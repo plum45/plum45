@@ -4,8 +4,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
-const google = require('googlethis');
-
+const { search } = require('duck-duck-scrape');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -183,12 +182,12 @@ app.post('/api/chat', async (req, res) => {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
             try {
-                console.log(`🌐 Performing Google Search for: "${lastMsg.content}"`);
-                const searchRes = await google.search(lastMsg.content, { page: 0, parse_ads: false });
+                console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
+                const searchRes = await search(lastMsg.content, { safeSearch: search.SafeSearchType.MODERATE });
                 if (searchRes && searchRes.results && searchRes.results.length > 0) {
                     const topResults = searchRes.results.slice(0, 5).map(r => `Title: ${r.title}\nDescription: ${r.description}`).join('\n\n');
                     console.log(`✅ Search found ${searchRes.results.length} results.`);
-                    lastMsg.content = `[REAL-TIME WEB DATA FROM GOOGLE SEARCH]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info.`;
+                    lastMsg.content = `[REAL-TIME WEB DATA]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info.`;
                 } else {
                     console.log('⚠️ Search returned no results.');
                 }
