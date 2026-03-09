@@ -40,6 +40,7 @@ const SYSTEM_PROMPT = `You are Qwen, an expert AI coding agent built on Qwen 3.5
 - **Refactor**: Suggest architectural improvements and cleaner patterns.
 - **Explain**: Break down complex systems with diagrams (using markdown), tables, and analogies.
 - **Review code**: Point out bugs, security issues, performance problems, and suggest fixes.
+- **Real-time Data**: If WEB SEARCH CONTEXT is provided in the user's message, YOU MUST use it to answer the question. Do not say you don't have real-time data.
 
 ## Response Format:
 - Start with a **brief explanation** of your approach (1-3 sentences).
@@ -182,12 +183,16 @@ app.post('/api/chat', async (req, res) => {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
             try {
+                console.log(`🌐 Performing Google Search for: "${lastMsg.content}"`);
                 const searchRes = await google.search(lastMsg.content, { page: 0, parse_ads: false });
                 if (searchRes && searchRes.results && searchRes.results.length > 0) {
-                    const topResults = searchRes.results.slice(0, 5).map(r => `[${r.title}](${r.url})\n${r.description}`).join('\n\n');
-                    lastMsg.content = `[WEB SEARCH CONTEXT]\n${topResults}\n\n[USER QUERY]\n${lastMsg.content}`;
+                    const topResults = searchRes.results.slice(0, 5).map(r => `Title: ${r.title}\nDescription: ${r.description}`).join('\n\n');
+                    console.log(`✅ Search found ${searchRes.results.length} results.`);
+                    lastMsg.content = `[REAL-TIME WEB DATA FROM GOOGLE SEARCH]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info.`;
+                } else {
+                    console.log('⚠️ Search returned no results.');
                 }
-            } catch (e) { console.error('Web search failed:', e); }
+            } catch (e) { console.error('❌ Web search failed:', e.message); }
         }
     }
 
