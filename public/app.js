@@ -9,7 +9,7 @@ const S = {
   artifacts: [], activeArt: null,
   schedules: [], // {id, time:"HH:MM", query:"...", active:true}
   schedTimers: {},
-  settings: { temp: 0.6, topP: 0.95, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent' },
+  settings: { temp: 0.6, topP: 0.95, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent', model: 'qwen/qwen3.5-122b-a10b' },
 };
 
 // ===== Render App Shell =====
@@ -103,6 +103,13 @@ function renderShell() {
           </select>
           <p class="ctrl-hint">Switch between coding mode and general assistance.</p>
         </div>
+        <div class="ctrl"><div class="ctrl-row"><label>Model</label></div>
+          <select id="sModel" class="ctrl-select">
+            <option value="qwen/qwen3.5-122b-a10b">Qwen 3.5 122B</option>
+            <option value="z-ai/glm4.7">GLM 4.7</option>
+          </select>
+          <p class="ctrl-hint">Choose the AI brain for your agent.</p>
+        </div>
         <div class="ctrl"><div class="ctrl-row"><label>Temperature</label><span class="ctrl-val" id="vTemp">0.60</span></div><input type="range" id="sTemp" min="0" max="1" step=".05" value=".6"><p class="ctrl-hint">Lower = focused. Higher = creative.</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Top P</label><span class="ctrl-val" id="vTopP">0.95</span></div><input type="range" id="sTopP" min="0" max="1" step=".05" value=".95"><p class="ctrl-hint">Nucleus sampling threshold.</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Max Tokens</label><span class="ctrl-val" id="vMax">16384</span></div><input type="range" id="sMax" min="256" max="16384" step="256" value="16384"><p class="ctrl-hint">Maximum response length.</p></div>
@@ -172,6 +179,7 @@ function bindAll() {
   $('closeSettings').addEventListener('click', () => $('settingsModal').classList.remove('vis'));
   $('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') $('settingsModal').classList.remove('vis'); });
   $('sMode').addEventListener('change', e => { S.settings.mode = e.target.value; save(); });
+  $('sModel').addEventListener('change', e => { S.settings.model = e.target.value; save(); });
   $('sTemp').addEventListener('input', e => { S.settings.temp = +e.target.value; $('vTemp').textContent = S.settings.temp.toFixed(2); save(); });
   $('sTopP').addEventListener('input', e => { S.settings.topP = +e.target.value; $('vTopP').textContent = S.settings.topP.toFixed(2); save(); });
   $('sMax').addEventListener('input', e => { S.settings.maxTok = +e.target.value; $('vMax').textContent = S.settings.maxTok; save(); });
@@ -206,6 +214,7 @@ function updateThinkPill() { document.getElementById('thinkPill').classList.togg
 function updateWebPill() { document.getElementById('webPill').classList.toggle('on', !!S.settings.webSearch); }
 function updateSettingsUI() {
   const modeSel = document.getElementById('sMode'); if (modeSel) modeSel.value = S.settings.mode || 'agent';
+  const modelSel = document.getElementById('sModel'); if (modelSel) modelSel.value = S.settings.model || 'qwen/qwen3.5-122b-a10b';
   document.getElementById('sTemp').value = S.settings.temp; document.getElementById('vTemp').textContent = S.settings.temp.toFixed(2);
   document.getElementById('sTopP').value = S.settings.topP; document.getElementById('vTopP').textContent = S.settings.topP.toFixed(2);
   document.getElementById('sMax').value = S.settings.maxTok; document.getElementById('vMax').textContent = S.settings.maxTok;
@@ -534,7 +543,16 @@ async function streamResp(chat) {
   try {
     const res = await fetch('/api/chat', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ messages, temperature: S.settings.temp, top_p: S.settings.topP, max_tokens: S.settings.maxTok, enable_thinking: S.settings.thinking, web_search: S.settings.webSearch, mode: S.settings.mode }),
+      body: JSON.stringify({
+        messages,
+        temperature: S.settings.temp,
+        top_p: S.settings.topP,
+        max_tokens: S.settings.maxTok,
+        enable_thinking: S.settings.thinking,
+        web_search: S.settings.webSearch,
+        mode: S.settings.mode,
+        model: S.settings.model
+      }),
       signal: S.ctrl.signal,
     });
     if (!res.ok) { const e = await res.json().catch(() => ({})); throw new Error(e.error || `HTTP ${res.status}`); }

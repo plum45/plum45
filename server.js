@@ -249,7 +249,7 @@ app.post('/api/chat', async (req, res) => {
     ];
 
     const payload = {
-        model: 'qwen/qwen3.5-122b-a10b',
+        model: req.body.model || 'qwen/qwen3.5-122b-a10b',
         messages: fullMessages,
         max_tokens, temperature, top_p,
         stream: true,
@@ -295,7 +295,7 @@ app.post('/api/generate-title', async (req, res) => {
     if (!message) return res.status(400).json({ error: 'Message required' });
     try {
         const response = await axios.post(NVIDIA_API_URL, {
-            model: 'qwen/qwen3.5-122b-a10b',
+            model: req.body.model || 'qwen/qwen3.5-122b-a10b',
             messages: [
                 { role: 'system', content: 'Generate a very short title (max 6 words) for this conversation. Return ONLY the title, nothing else. No quotes.' },
                 { role: 'user', content: message },
