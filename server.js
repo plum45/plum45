@@ -2,9 +2,17 @@ const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
 const path = require('path');
-const fs = require('fs');
 const cron = require('node-cron');
-const cheerio = require('cheerio'); const app = express();
+const cheerio = require('cheerio');
+const admin = require('firebase-admin');
+
+// Initialize Firebase Admin (Using your project ID without secrets for public test)
+if (admin.apps.length === 0) {
+    admin.initializeApp({ projectId: "ai--agent-12d7a" });
+}
+const db = admin.firestore();
+
+const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
@@ -62,51 +70,41 @@ function trimMessages(messages, maxTokenEstimate = 12000) {
 }
 
 // ========== Server-Side Scheduler ==========
-const SCHEDULES_FILE = path.join(__dirname, 'schedules.json');
-let schedules = [];
-let cronJobs = {};
+let activeJobs = {};
 
 function loadSchedules() {
-    try {
-        if (fs.existsSync(SCHEDULES_FILE)) {
-            schedules = JSON.parse(fs.readFileSync(SCHEDULES_FILE, 'utf8'));
-        }
-    } catch (e) { schedules = []; }
-}
-
-function saveSchedules() {
-    try { fs.writeFileSync(SCHEDULES_FILE, JSON.stringify(schedules, null, 2)); } catch (e) { }
+    setupCronJobs();
 }
 
 function setupCronJobs() {
     // Clear existing jobs
-    Object.values(cronJobs).forEach(job => job.stop());
-    cronJobs = {};
+    Object.values(activeJobs).forEach(job => job.stop());
+    activeJobs = {};
 
-    schedules.filter(s => s.active).forEach(s => {
-        const [hour, min] = s.time.split(':').map(Number);
-        const cronExpr = `${min} ${hour} * * *`; // Every day at HH:MM
+    db.collection('schedules').where('active', '==', true).get().then(snapshot => {
+        snapshot.forEach(doc => {
+            const s = { id: doc.id, ...doc.data() };
+            if (!s.time) return;
+            const [hour, min] = s.time.split(':').map(Number);
+            const cronExpr = `${min} ${hour} * * *`;
 
-        if (cron.validate(cronExpr)) {
-            cronJobs[s.id] = cron.schedule(cronExpr, async () => {
-                console.log(`⏰ Running scheduled task: "${s.query}" at ${s.time}`);
-                try {
-                    const result = await runQuery(s.query);
-                    // Store result
-                    s.lastRun = new Date().toISOString();
-                    s.lastResult = result.substring(0, 2000); // Keep last 2000 chars
-                    saveSchedules();
-                    console.log(`✅ Scheduled task completed: "${s.query}"`);
-                } catch (e) {
-                    console.error(`❌ Scheduled task failed: ${e.message}`);
-                    s.lastRun = new Date().toISOString();
-                    s.lastResult = `Error: ${e.message}`;
-                    saveSchedules();
-                }
-            }, { timezone: 'Asia/Bangkok' });
-            console.log(`  📅 Cron scheduled: "${s.query}" at ${s.time} (${cronExpr})`);
-        }
-    });
+            if (cron.validate(cronExpr)) {
+                activeJobs[s.id] = cron.schedule(cronExpr, async () => {
+                    console.log(`⏰ Running scheduled task: "${s.query}" at ${s.time}`);
+                    try {
+                        const result = await runQuery(s.query);
+                        await db.collection('schedules').doc(s.id).update({
+                            lastRun: new Date().toISOString(),
+                            lastResult: result.substring(0, 2000)
+                        });
+                        console.log(`✅ Scheduled task completed: "${s.query}"`);
+                    } catch (e) {
+                        console.error(`❌ Scheduled task failed: ${e.message}`);
+                    }
+                }, { timezone: 'Asia/Bangkok' });
+            }
+        });
+    }).catch(e => console.error("Error loading schedules:", e.message));
 }
 
 async function runQuery(query) {
@@ -129,45 +127,47 @@ async function runQuery(query) {
 }
 
 // ========== Schedule API Endpoints ==========
-app.get('/api/schedules', (req, res) => {
-    res.json(schedules);
+app.get('/api/schedules', async (req, res) => {
+    try {
+        const snap = await db.collection('schedules').get();
+        const docs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+        res.json(docs);
+    } catch (e) { res.status(500).json([]); }
 });
 
-app.post('/api/schedules', (req, res) => {
+app.post('/api/schedules', async (req, res) => {
     const { time, query } = req.body;
     if (!time || !query) return res.status(400).json({ error: 'time and query required' });
-
-    const sched = {
-        id: 's' + Date.now(),
-        time,
-        query,
-        active: true,
-        createdAt: new Date().toISOString(),
-        lastRun: null,
-        lastResult: null,
-    };
-    schedules.push(sched);
-    saveSchedules();
-    setupCronJobs();
-    res.json(sched);
+    try {
+        const sched = {
+            time, query, active: true,
+            createdAt: new Date().toISOString(),
+            lastRun: null, lastResult: null
+        };
+        const doc = await db.collection('schedules').add(sched);
+        setupCronJobs();
+        res.json({ id: doc.id, ...sched });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/schedules/:id', (req, res) => {
-    const s = schedules.find(x => x.id === req.params.id);
-    if (!s) return res.status(404).json({ error: 'Not found' });
-    if (req.body.active !== undefined) s.active = req.body.active;
-    if (req.body.time) s.time = req.body.time;
-    if (req.body.query) s.query = req.body.query;
-    saveSchedules();
-    setupCronJobs();
-    res.json(s);
+app.put('/api/schedules/:id', async (req, res) => {
+    try {
+        const updates = {};
+        if (req.body.active !== undefined) updates.active = req.body.active;
+        if (req.body.time) updates.time = req.body.time;
+        if (req.body.query) updates.query = req.body.query;
+        await db.collection('schedules').doc(req.params.id).update(updates);
+        setupCronJobs();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/schedules/:id', (req, res) => {
-    schedules = schedules.filter(x => x.id !== req.params.id);
-    saveSchedules();
-    setupCronJobs();
-    res.json({ ok: true });
+app.delete('/api/schedules/:id', async (req, res) => {
+    try {
+        await db.collection('schedules').doc(req.params.id).delete();
+        setupCronJobs();
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ========== Chat Endpoint with Retry ==========
@@ -301,8 +301,6 @@ if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
         console.log(`\n  🚀 Qwen Agent running at http://localhost:${PORT}`);
         console.log(`  🧠 Model: Qwen 3.5-122B (Agent mode)`);
         console.log(`  ⚡ Features: Streaming, Thinking, Scheduler, Auto-titles`);
-        console.log(`  📅 Active schedules: ${schedules.filter(s => s.active).length}\n`);
-        setupCronJobs();
     });
 } else {
     // On Vercel, setup cron jobs as memory fallback (though they will sleep)
