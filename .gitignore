@@ -3,3 +3,11 @@ node_modules/
 schedules.json
 .DS_Store
 .vercel
+serviceAccountKey.json
+test-dds.js
+test-yahoo.js
+test-google.js
+test-ddg-lite.js
+test-ddg.js
+out.html
+out.json

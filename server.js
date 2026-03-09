@@ -5,10 +5,25 @@ const path = require('path');
 const cron = require('node-cron');
 const cheerio = require('cheerio');
 const admin = require('firebase-admin');
+const fs = require('fs');
 
-// Initialize Firebase Admin (Using your project ID without secrets for public test)
+// Initialize Firebase Admin
+let adminConfig = { projectId: "ai--agent-12d7a" };
+
+try {
+    const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
+    if (fs.existsSync(serviceAccountPath)) {
+        adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
+        console.log("Firebase Admin: Initialized with local serviceAccountKey.json");
+    } else {
+        console.log("Firebase Admin: Initialized with default credentials (needs GOOGLE_APPLICATION_CREDENTIALS locally)");
+    }
+} catch (e) {
+    console.error("Firebase Admin Config Error:", e.message);
+}
+
 if (admin.apps.length === 0) {
-    admin.initializeApp({ projectId: "ai--agent-12d7a" });
+    admin.initializeApp(adminConfig);
 }
 const db = admin.firestore();
 
@@ -183,19 +198,20 @@ app.post('/api/chat', async (req, res) => {
             try {
                 console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
 
-                // Use built-in scraper for DuckDuckGo HTML
-                const ddgRes = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(lastMsg.content)}`, {
+                // Use DDG Lite POST strategy
+                const ddgRes = await axios.post(`https://lite.duckduckgo.com/lite/`, 'q=' + encodeURIComponent(lastMsg.content), {
                     headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                        'Content-Type': 'application/x-www-form-urlencoded'
                     },
                     timeout: 8000
                 });
 
                 const $ = cheerio.load(ddgRes.data);
                 const results = [];
-                $('.result__snippet').each((i, el) => {
+                $('.result-snippet').each((i, el) => {
                     const description = $(el).text().trim();
-                    const title = $(el).closest('.result').find('.result__title').text().trim();
+                    const title = $(el).parent().prev().find('.result-link').text().trim();
                     if (description.length > 5) results.push(`Title: ${title}\nDescription: ${description}`);
                 });
 
