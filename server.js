@@ -192,13 +192,14 @@ app.post('/api/chat', async (req, res) => {
         return res.status(400).json({ error: 'Messages array is required' });
     }
 
+    let searchContextStr = "";
+
     if (web_search) {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
             try {
                 console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
 
-                // Use DDG Lite POST strategy
                 const ddgRes = await axios.post(`https://lite.duckduckgo.com/lite/`, 'q=' + encodeURIComponent(lastMsg.content), {
                     headers: {
                         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -218,7 +219,7 @@ app.post('/api/chat', async (req, res) => {
                 if (results.length > 0) {
                     const topResults = results.slice(0, 5).join('\n\n');
                     console.log(`✅ Search found ${results.length} results.`);
-                    lastMsg.content = `[REAL-TIME WEB DATA FROM DUCKDUCKGO]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info. Provide the weather or current facts requested.`;
+                    searchContextStr = `\n\n[CRITICAL REAL-TIME DATA]:\nYou MUST use the following search results to answer the user's upcoming question. DO NOT apologize or say you don't have real-time access. The system has provided this data for you.\n\n${topResults}\n`;
                 } else {
                     console.log('⚠️ Search returned no results.');
                 }
@@ -227,7 +228,10 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const trimmedMessages = trimMessages(messages);
-    const fullMessages = [{ role: 'system', content: SYSTEM_PROMPT }, ...trimmedMessages];
+    const fullMessages = [
+        { role: 'system', content: SYSTEM_PROMPT + searchContextStr },
+        ...trimmedMessages
+    ];
 
     const payload = {
         model: 'qwen/qwen3.5-122b-a10b',
