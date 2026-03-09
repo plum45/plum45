@@ -4,8 +4,7 @@ const axios = require('axios');
 const path = require('path');
 const fs = require('fs');
 const cron = require('node-cron');
-const { search } = require('duck-duck-scrape');
-const app = express();
+const cheerio = require('cheerio'); const app = express();
 const PORT = process.env.PORT || 3000;
 
 app.use(cors());
@@ -183,11 +182,35 @@ app.post('/api/chat', async (req, res) => {
         if (lastMsg && lastMsg.role === 'user') {
             try {
                 console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
-                const searchRes = await search(lastMsg.content, { safeSearch: search.SafeSearchType.MODERATE });
-                if (searchRes && searchRes.results && searchRes.results.length > 0) {
-                    const topResults = searchRes.results.slice(0, 5).map(r => `Title: ${r.title}\nDescription: ${r.description}`).join('\n\n');
-                    console.log(`✅ Search found ${searchRes.results.length} results.`);
-                    lastMsg.content = `[REAL-TIME WEB DATA]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info.`;
+
+                // Use built-in scraper for DuckDuckGo Lite
+                const searchData = new URLSearchParams();
+                searchData.append('q', lastMsg.content);
+                const ddgRes = await axios.post('https://lite.duckduckgo.com/lite/', searchData.toString(), {
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                    },
+                    timeout: 8000
+                });
+
+                const $ = cheerio.load(ddgRes.data);
+                const results = [];
+                $('tr').each((i, el) => {
+                    const titleEl = $(el).find('td.result-snippet');
+                    if (titleEl.length > 0) {
+                        const description = titleEl.text().trim();
+                        // Get the title from previous row
+                        const prevTitleEl = $(el).prev('tr').find('a.result-url');
+                        const title = prevTitleEl.text().trim() || 'Result';
+                        if (description.length > 10) results.push(`Title: ${title}\nDescription: ${description}`);
+                    }
+                });
+
+                if (results.length > 0) {
+                    const topResults = results.slice(0, 5).join('\n\n');
+                    console.log(`✅ Search found ${results.length} results.`);
+                    lastMsg.content = `[REAL-TIME WEB DATA FROM DUCKDUCKGO]\n${topResults}\n\n---\n[USER QUERY]:\n${lastMsg.content}\n\nINSTRUCTION: You HAVE access to the real-time internet data above. Use it to answer the user query accurately. DO NOT say you don't have access to real-time info. Provide the weather or current facts requested.`;
                 } else {
                     console.log('⚠️ Search returned no results.');
                 }
