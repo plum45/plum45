@@ -37,6 +37,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ========== Config (use ENV for security) ==========
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
+const OPENAQ_API_KEY = process.env.OPENAQ_API_KEY || 'YOUR-OPENAQ-API-KEY'; // Replace with your key
+const OPENAQ_API_URL = 'https://api.openaq.org/v3';
 
 const SYSTEM_PROMPT_CODING = `You are Qwen, an expert AI coding agent built on Qwen 3.5-122B. You are a pair programmer and software architect who writes production-ready code.
 
@@ -136,6 +138,35 @@ function setupCronJobs() {
     }).catch(e => console.error("Error loading schedules:", e.message));
 }
 
+async function getAirQuality(locationIdOrCity) {
+    if (!OPENAQ_API_KEY || OPENAQ_API_KEY === 'YOUR-OPENAQ-API-KEY') return null;
+    try {
+        console.log(`🌍 Fetching Air Quality for: ${locationIdOrCity}`);
+        // If it's a number, assume location ID, otherwise search for locations in city
+        let locationId = locationIdOrCity;
+        if (isNaN(locationIdOrCity)) {
+            const locRes = await axios.get(`${OPENAQ_API_URL}/locations?limit=1&countries_id=141&city=${encodeURIComponent(locationIdOrCity)}`, {
+                headers: { 'X-API-Key': OPENAQ_API_KEY }
+            });
+            if (locRes.data.results?.length > 0) {
+                locationId = locRes.data.results[0].id;
+            } else return null;
+        }
+
+        const res = await axios.get(`${OPENAQ_API_URL}/locations/${locationId}/latest`, {
+            headers: { 'X-API-Key': OPENAQ_API_KEY }
+        });
+
+        const data = res.data.results;
+        if (!data || data.length === 0) return "No recent air quality data available for this location.";
+
+        return data.map(r => `${r.parameter.displayName}: ${r.value} ${r.parameter.units}`).join('\n');
+    } catch (e) {
+        console.error("OpenAQ Error:", e.response?.data || e.message);
+        return null;
+    }
+}
+
 async function runQuery(query) {
     const response = await axios.post(NVIDIA_API_URL, {
         model: 'qwen/qwen3.5-122b-a10b',
@@ -212,6 +243,17 @@ app.post('/api/chat', async (req, res) => {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
             try {
+                // Check if it's an Air Quality related query
+                const isAQ = /ฝุ่น|PM2\.5|อากาศ|AQI|air quality/i.test(lastMsg.content);
+                let aqData = null;
+
+                if (isAQ && OPENAQ_API_KEY !== 'YOUR-OPENAQ-API-KEY') {
+                    // Try to extract city name (simple heuristic)
+                    const cityMatch = lastMsg.content.match(/(ที่|ใน|เมือง)\s*([ก-๙a-zA-Z]+)/);
+                    const city = cityMatch ? cityMatch[2] : "Bangkok";
+                    aqData = await getAirQuality(city);
+                }
+
                 console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
 
                 const ddgRes = await axios.post(`https://lite.duckduckgo.com/lite/`, 'q=' + encodeURIComponent(lastMsg.content), {
@@ -230,10 +272,11 @@ app.post('/api/chat', async (req, res) => {
                     if (description.length > 5) results.push(`Title: ${title}\nDescription: ${description}`);
                 });
 
-                if (results.length > 0) {
+                if (results.length > 0 || aqData) {
                     const topResults = results.slice(0, 5).join('\n\n');
+                    const aqSnippet = aqData ? `[AIR QUALITY DATA FROM OPENAQ]:\n${aqData}\n\n` : "";
                     console.log(`✅ Search found ${results.length} results.`);
-                    searchContextStr = `\n\n[CRITICAL REAL-TIME DATA]:\nYou MUST use the following search results to answer the user's upcoming question. DO NOT apologize or say you don't have real-time access. The system has provided this data for you.\n\n${topResults}\n`;
+                    searchContextStr = `\n\n[CRITICAL REAL-TIME DATA]:\nYou MUST use the following data to answer the user's upcoming question. DO NOT apologize or say you don't have real-time access. The system has provided this data for you.\n\n${aqSnippet}${topResults}\n`;
                 } else {
                     console.log('⚠️ Search returned no results.');
                 }
