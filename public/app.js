@@ -30,6 +30,7 @@ function renderShell() {
         <button class="ibtn" id="openSettings" title="Settings">⚙</button>
       </div>
     </aside>
+    <div class="side-overlay" id="sideOverlay"></div>
 
     <button class="mob-btn" id="mobBtn">☰</button>
 
@@ -177,6 +178,7 @@ function bindAll() {
   $('input').addEventListener('input', () => { autoResize(); updateSendBtn(); });
   $('newChat').addEventListener('click', newChat);
   $('mobBtn').addEventListener('click', () => $('side').classList.toggle('open'));
+  $('sideOverlay').addEventListener('click', () => $('side').classList.remove('open'));
   $('thinkPill').addEventListener('click', () => { S.settings.thinking = !S.settings.thinking; updateThinkPill(); save(); });
   $('webPill').addEventListener('click', () => { S.settings.webSearch = !S.settings.webSearch; updateWebPill(); save(); });
   $('attachBtn').addEventListener('click', () => $('fileInput').click());
