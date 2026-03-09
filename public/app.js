@@ -10,6 +10,7 @@ const S = {
   schedules: [], // {id, time:"HH:MM", query:"...", active:true}
   schedTimers: {},
   settings: { temp: 0.6, topP: 0.95, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent', model: 'qwen/qwen3.5-122b-a10b' },
+  attachedFiles: [], // [{name, content}]
 };
 
 // ===== Render App Shell =====
@@ -57,10 +58,15 @@ function renderShell() {
       </div>
 
       <div class="inp-wrap">
+        <div id="fileChips" class="file-chips"></div>
         <div class="inp-box">
+          <input type="file" id="fileInput" hidden multiple>
           <textarea id="input" placeholder="Message Qwen..." rows="1"></textarea>
           <div class="inp-foot">
             <div style="display:flex; gap:6px;">
+              <button class="think-pill" id="attachBtn" title="Attach files">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              </button>
               <button class="think-pill" id="thinkPill">
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
                 Extended thinking
@@ -173,6 +179,8 @@ function bindAll() {
   $('mobBtn').addEventListener('click', () => $('side').classList.toggle('open'));
   $('thinkPill').addEventListener('click', () => { S.settings.thinking = !S.settings.thinking; updateThinkPill(); save(); });
   $('webPill').addEventListener('click', () => { S.settings.webSearch = !S.settings.webSearch; updateWebPill(); save(); });
+  $('attachBtn').addEventListener('click', () => $('fileInput').click());
+  $('fileInput').addEventListener('change', handleFileAttach);
 
   // Settings
   $('openSettings').addEventListener('click', () => $('settingsModal').classList.add('vis'));
@@ -225,6 +233,34 @@ function showToast(msg) {
   const t = document.getElementById('toast');
   t.textContent = msg; t.classList.add('show');
   setTimeout(() => t.classList.remove('show'), 3000);
+}
+
+// ===== File Handling =====
+async function handleFileAttach(e) {
+  const files = Array.from(e.target.files);
+  for (const f of files) {
+    if (f.size > 1024 * 1024) { showToast(`❌ File ${f.name} too large (>1MB)`); continue; }
+    const content = await f.text();
+    S.attachedFiles.push({ name: f.name, content });
+  }
+  renderFileChips();
+  e.target.value = '';
+}
+
+function renderFileChips() {
+  const el = document.getElementById('fileChips');
+  el.innerHTML = S.attachedFiles.map((f, i) => `
+    <div class="file-chip">
+      <span>${esc(f.name)}</span>
+      <button onclick="removeFile(${i})">✕</button>
+    </div>
+  `).join('');
+  el.style.display = S.attachedFiles.length ? 'flex' : 'none';
+}
+
+function removeFile(i) {
+  S.attachedFiles.splice(i, 1);
+  renderFileChips();
 }
 
 // ===== Persistence =====
@@ -495,8 +531,15 @@ async function genTitle(chatId, msg) {
 
 // ===== Send & Stream =====
 async function handleSend() {
-  const txt = document.getElementById('input').value.trim();
-  if (!txt || S.streaming) return;
+  let txt = document.getElementById('input').value.trim();
+  if (!txt && !S.attachedFiles.length || S.streaming) return;
+
+  if (S.attachedFiles.length) {
+    const fileCtx = S.attachedFiles.map(f => `FILE: ${f.name}\n---\n${f.content}\n---`).join('\n\n');
+    txt = `[ATTACHED FILES]:\n${fileCtx}\n\n[USER MESSAGE]:\n${txt || "Analyze these files."}`;
+    S.attachedFiles = [];
+    renderFileChips();
+  }
 
   let chat = getChat();
   const isNew = !chat;
