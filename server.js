@@ -11,7 +11,7 @@ const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
-app.use(express.static(path.join(__dirname, 'public'), { maxAge: '1h', etag: true }));
+app.use(express.static(path.join(__dirname, 'public')));
 
 // ========== Config (use ENV for security) ==========
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
