@@ -183,28 +183,20 @@ app.post('/api/chat', async (req, res) => {
             try {
                 console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
 
-                // Use built-in scraper for DuckDuckGo Lite
-                const searchData = new URLSearchParams();
-                searchData.append('q', lastMsg.content);
-                const ddgRes = await axios.post('https://lite.duckduckgo.com/lite/', searchData.toString(), {
+                // Use built-in scraper for DuckDuckGo HTML
+                const ddgRes = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(lastMsg.content)}`, {
                     headers: {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                     },
                     timeout: 8000
                 });
 
                 const $ = cheerio.load(ddgRes.data);
                 const results = [];
-                $('tr').each((i, el) => {
-                    const titleEl = $(el).find('td.result-snippet');
-                    if (titleEl.length > 0) {
-                        const description = titleEl.text().trim();
-                        // Get the title from previous row
-                        const prevTitleEl = $(el).prev('tr').find('a.result-url');
-                        const title = prevTitleEl.text().trim() || 'Result';
-                        if (description.length > 10) results.push(`Title: ${title}\nDescription: ${description}`);
-                    }
+                $('.result__snippet').each((i, el) => {
+                    const description = $(el).text().trim();
+                    const title = $(el).closest('.result').find('.result__title').text().trim();
+                    if (description.length > 5) results.push(`Title: ${title}\nDescription: ${description}`);
                 });
 
                 if (results.length > 0) {
