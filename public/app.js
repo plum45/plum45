@@ -210,8 +210,62 @@ function showToast(msg) {
 }
 
 // ===== Persistence =====
-function save() { try { localStorage.setItem('qwen-v4', JSON.stringify({ chats: S.chats, activeId: S.activeId, settings: S.settings, artifacts: S.artifacts })); } catch (e) { } }
-function load() { try { const d = JSON.parse(localStorage.getItem('qwen-v4') || '{}'); S.chats = d.chats || []; S.activeId = d.activeId || null; S.artifacts = d.artifacts || []; if (d.settings) S.settings = { ...S.settings, ...d.settings }; } catch (e) { } }
+const firebaseConfig = {
+  apiKey: "AIzaSyDvqwiVCAm6yzX6YCH-ReQac-1ZSVxLGP8",
+  authDomain: "ai--agent-12d7a.firebaseapp.com",
+  projectId: "ai--agent-12d7a",
+  storageBucket: "ai--agent-12d7a.firebasestorage.app",
+  messagingSenderId: "1022795334044",
+  appId: "1:1022795334044:web:44f14c8486d1c178050859",
+  measurementId: "G-ZPNSM95NEC"
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+
+let syncTimer = null;
+function save() {
+  try {
+    localStorage.setItem('qwen-v4', JSON.stringify({ chats: S.chats, activeId: S.activeId, settings: S.settings, artifacts: S.artifacts }));
+    clearTimeout(syncTimer);
+    syncTimer = setTimeout(() => {
+      db.collection('users').doc('me').set({
+        chats: S.chats, activeId: S.activeId, settings: S.settings, artifacts: S.artifacts
+      }).catch(e => console.error("Firebase sync error:", e));
+    }, 1500);
+  } catch (e) { }
+}
+
+function load() {
+  try {
+    const d = JSON.parse(localStorage.getItem('qwen-v4') || '{}');
+    S.chats = d.chats || []; S.activeId = d.activeId || null; S.artifacts = d.artifacts || []; if (d.settings) S.settings = { ...S.settings, ...d.settings };
+
+    // Real-time Cloud Sync
+    db.collection('users').doc('me').onSnapshot(doc => {
+      if (doc.exists) {
+        const data = doc.data();
+        const curState = JSON.stringify({ c: S.chats, a: S.artifacts, s: S.settings });
+        const newState = JSON.stringify({ c: data.chats, a: data.artifacts, s: data.settings });
+
+        if (curState !== newState && document.getElementById('chatList')) {
+          S.chats = data.chats || [];
+          S.activeId = data.activeId || null;
+          S.artifacts = data.artifacts || [];
+          if (data.settings) S.settings = { ...S.settings, ...data.settings };
+
+          localStorage.setItem('qwen-v4', JSON.stringify({ chats: S.chats, activeId: S.activeId, settings: S.settings, artifacts: S.artifacts }));
+          renderChatList();
+          if (S.activeId) { renderChat(); } else {
+            document.getElementById('welcome').style.display = '';
+            document.getElementById('msgs').style.display = 'none';
+          }
+          updateSettingsUI();
+          updateThinkPill(); updateWebPill();
+        }
+      }
+    });
+  } catch (e) { }
+}
 
 // ===== Chat Management =====
 function getChat() { return S.chats.find(c => c.id === S.activeId); }
@@ -536,5 +590,7 @@ async function streamResp(chat) {
 function stopStream() { if (S.ctrl) S.ctrl.abort(); }
 
 // ===== Boot =====
-load();
-document.addEventListener('DOMContentLoaded', renderShell);
+document.addEventListener('DOMContentLoaded', () => {
+  load();
+  renderShell();
+});
