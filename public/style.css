@@ -1273,9 +1273,10 @@ button {
     background: rgba(0, 0, 0, 0.5);
     backdrop-filter: blur(2px);
     z-index: 999;
+    pointer-events: auto;
   }
 
-  .side.open+.side-overlay {
+  .side.open~.side-overlay {
     display: block;
   }
 
@@ -1335,8 +1336,9 @@ button {
   }
 
   .modal {
-    width: 95%;
-    margin: 10px;
+    width: 90%;
+    max-width: 400px;
+    margin: auto;
   }
 
   .ctrl-row label {
