@@ -38,8 +38,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 
-// ========== Agent System Prompt ==========
-const SYSTEM_PROMPT = `You are Qwen, an expert AI coding agent built on Qwen 3.5-122B. You are a pair programmer and software architect who writes production-ready code.
+const SYSTEM_PROMPT_CODING = `You are Qwen, an expert AI coding agent built on Qwen 3.5-122B. You are a pair programmer and software architect who writes production-ready code.
 
 ## Identity & Behavior:
 - You are an AI **agent** — proactive, thorough, and code-first.
@@ -70,6 +69,21 @@ const SYSTEM_PROMPT = `You are Qwen, an expert AI coding agent built on Qwen 3.5
 - Use **bold** for emphasis, \`inline code\` for technical terms.
 - Use tables for comparisons, numbered lists for steps.
 - Use > blockquotes for warnings or important notes.`;
+
+const SYSTEM_PROMPT_AGENT = `You are Qwen, a highly intelligent and helpful AI assistant built on Qwen 3.5-122B. Your primary goal is to help users with their general queries, answer questions accurately, and converse naturally.
+
+## Identity & Behavior:
+- You are a knowledgeable assistant. You answer clearly and concisely.
+- Do NOT generate code unless explicitly asked by the user to do so. Focus on answering the question directly.
+- You think step-by-step to provide accurate and detailed answers.
+- You respond in the same language the user writes in (e.g., Thai → Thai, English → English).
+- Be polite, professional, and helpful.
+- When given [CRITICAL REAL-TIME DATA] or other search contexts, always incorporate that data smoothly into your response without apologizing for lacking real-time capabilities. Your answers should sound confident based on the provided data.
+
+## Response Format:
+- Use simple, easy-to-read formatting.
+- Use **bold** for emphasis.
+- Use tables or bullet points for structured data.`;
 
 // ========== Context Management ==========
 function trimMessages(messages, maxTokenEstimate = 12000) {
@@ -126,7 +140,7 @@ async function runQuery(query) {
     const response = await axios.post(NVIDIA_API_URL, {
         model: 'qwen/qwen3.5-122b-a10b',
         messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: SYSTEM_PROMPT_AGENT },
             { role: 'user', content: query },
         ],
         max_tokens: 4096,
@@ -187,7 +201,7 @@ app.delete('/api/schedules/:id', async (req, res) => {
 
 // ========== Chat Endpoint with Retry ==========
 app.post('/api/chat', async (req, res) => {
-    const { messages, temperature = 0.6, top_p = 0.95, max_tokens = 16384, enable_thinking = true, web_search = false } = req.body;
+    const { messages, temperature = 0.6, top_p = 0.95, max_tokens = 16384, enable_thinking = true, web_search = false, mode = 'coding' } = req.body;
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
         return res.status(400).json({ error: 'Messages array is required' });
     }
@@ -228,8 +242,9 @@ app.post('/api/chat', async (req, res) => {
     }
 
     const trimmedMessages = trimMessages(messages);
+    const selectedPrompt = mode === 'agent' ? SYSTEM_PROMPT_AGENT : SYSTEM_PROMPT_CODING;
     const fullMessages = [
-        { role: 'system', content: SYSTEM_PROMPT + searchContextStr },
+        { role: 'system', content: selectedPrompt + searchContextStr },
         ...trimmedMessages
     ];
 

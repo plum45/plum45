@@ -1043,6 +1043,23 @@ button {
   border: 2px solid var(--bg-2)
 }
 
+.ctrl-select {
+  width: 100%;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-3);
+  color: var(--text-1);
+  border: 1px solid var(--border2);
+  outline: none;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: .85rem;
+}
+
+.ctrl-select:focus {
+  border-color: rgba(192, 132, 252, .25);
+}
+
 .ctrl-hint {
   font-size: .72rem;
   color: var(--text-3);
