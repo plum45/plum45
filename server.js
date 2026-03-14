@@ -25,17 +25,31 @@ try {
     if (serviceAccountEnv) {
         let parsedCreds;
         try {
-            // Clean up potentially quoted strings from Render/ENV
-            const cleanEnv = serviceAccountEnv.trim().replace(/^['"]|['"]$/g, '');
+            let cleanEnv = serviceAccountEnv.trim();
+            // Handle if user accidentally added quotes around the whole thing
+            if ((cleanEnv.startsWith('"') && cleanEnv.endsWith('"')) || (cleanEnv.startsWith("'") && cleanEnv.endsWith("'"))) {
+                cleanEnv = cleanEnv.substring(1, cleanEnv.length - 1);
+            }
+            
+            // If it doesn't look like JSON, it's definitely an error
+            if (!cleanEnv.startsWith('{')) {
+                throw new Error("Missing start brace { - check if you copied the whole code!");
+            }
+
             parsedCreds = JSON.parse(cleanEnv.replace(/\\n/g, '\n'));
             adminConfig.credential = admin.credential.cert(parsedCreds);
             if (admin.apps.length === 0) admin.initializeApp(adminConfig);
             firebaseStatus = "🟢 Service Account Active";
             console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV");
         } catch (jsonErr) {
-            console.error("❌ Firebase ENV Parse Error:", jsonErr.message);
+            console.error("❌ Firebase ENV Error:", jsonErr.message);
             if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-            firebaseStatus = "⚠️ Auth Error (Check Key Rules)";
+            // Show a hint in the status if it's a common mistake
+            if (jsonErr.message.includes("Unexpected token")) {
+                firebaseStatus = "⚠️ Format Error (Copy the WHOLE code)";
+            } else {
+                firebaseStatus = `⚠️ ${jsonErr.message}`;
+            }
         }
     } else if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
