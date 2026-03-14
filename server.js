@@ -19,17 +19,23 @@ const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.o
 const adminConfig = { projectId: "ai--agent-12d7a" };
 try {
     const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
-    if (fs.existsSync(serviceAccountPath)) {
+    const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+
+    if (serviceAccountEnv) {
+        adminConfig.credential = admin.credential.cert(JSON.parse(serviceAccountEnv));
+        if (admin.apps.length === 0) admin.initializeApp(adminConfig);
+        console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV");
+    } else if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
         if (admin.apps.length === 0) admin.initializeApp(adminConfig);
-        console.log("✅ Firebase Admin: Cloud Sync Enabled");
+        console.log("✅ Firebase Admin: Cloud Sync Enabled via FILE");
     } else {
         if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-        console.log("ℹ️ Firebase Admin: Local Mode (No Credentials)");
+        console.log("⚠️ Firebase Admin: Local Mode (No Credentials) - Database actions might fail");
     }
 } catch (e) {
     if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-    console.log("ℹ️ Firebase Admin: Minimal Mode");
+    console.error("❌ Firebase Initialization Error:", e.message);
 }
 const db = admin.firestore();
 
@@ -215,7 +221,7 @@ if (bot) {
         try {
             const snapshot = await db.collection('userActivities').doc(String(userId)).collection('tasks')
                 .orderBy('createdAt', 'desc').limit(10).get();
-            if (snapshot.empty) return ctx.reply('📭 คุณยังไม่มีงานในตารางครับ');
+            if (snapshot.empty) return ctx.reply('📭 คุณยังไม่มีงานในตารางครับ (ถ้าเพิ่งเริ่มใช้งาน ลองสั่งจดงานก่อนนะครับ)');
             let text = "📅 **ตารางงานล่าสุดของคุณ:**\n\n";
             snapshot.forEach(doc => {
                 const task = doc.data();
@@ -223,7 +229,8 @@ if (bot) {
             });
             ctx.reply(text);
         } catch (e) {
-            ctx.reply('❌ ไม่สามารถดึงตารางงานได้ในขณะนี้ครับ');
+            console.error('Schedule Fetch Error:', e);
+            ctx.reply(`❌ ไม่สามารถดึงตารางงานได้: ${e.message}`);
         }
     });
 
@@ -232,16 +239,17 @@ if (bot) {
         try {
             const snapshot = await db.collection('userActivities').doc(String(userId)).collection('logs')
                 .orderBy('timestamp', 'desc').limit(10).get();
-            if (snapshot.empty) return ctx.reply('📭 ยังไม่มีบันทึกข้อมูลครับ');
+            if (snapshot.empty) return ctx.reply('📭 ยังไม่มีบันทึกข้อมูลครับ (ลองสั่ง "ลงเวลางานหน่อย" ดูครับ)');
             let text = "📝 **บันทึกกิจกรรมล่าสุด:**\n\n";
             snapshot.forEach(doc => {
                 const log = doc.data();
-                const time = log.timestamp.toDate().toLocaleString('th-TH');
+                const time = log.timestamp && log.timestamp.toDate ? log.timestamp.toDate().toLocaleString('th-TH') : 'ไม่ระบุเวลา';
                 text += `🔹 [${time}] ${log.content}\n`;
             });
             ctx.reply(text);
         } catch (e) {
-            ctx.reply('❌ ไม่สามารถดึงบันทึกได้ครับ');
+            console.error('Logs Fetch Error:', e);
+            ctx.reply(`❌ ไม่สามารถดึงบันทึกได้: ${e.message}`);
         }
     });
 
