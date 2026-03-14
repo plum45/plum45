@@ -44,6 +44,38 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN) : null;
 const tgContexts = new Map();
 
+// ========== Long-term Memory Logic ==========
+async function getBotMemory(userId) {
+    try {
+        const doc = await db.collection('botMemories').doc(String(userId)).get();
+        return doc.exists ? doc.data().facts || [] : [];
+    } catch (e) { return []; }
+}
+
+async function saveBotMemory(userId, userMsg, botReply) {
+    try {
+        // Extract 1-3 key facts about the user in the background
+        const res = await axios.post(NVIDIA_API_URL, {
+            model: 'qwen/qwen2.5-7b-instruct',
+            messages: [
+                { role: 'system', content: 'Identify 1-3 important details about the user for long-term memory. Format: - [Fact]. Be concise. Language: Thai.' },
+                { role: 'user', content: `Message: ${userMsg}\nResponse: ${botReply}` }
+            ],
+            max_tokens: 150
+        }, { headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}` }, timeout: 5000 });
+
+        const extracted = res.data.choices[0].message.content.split('\n').filter(l => l.includes('-')).map(l => l.trim());
+        if (extracted.length > 0) {
+            const memRef = db.collection('botMemories').doc(String(userId));
+            const current = await memRef.get();
+            let facts = current.exists ? current.data().facts || [] : [];
+            facts = [...new Set([...facts, ...extracted])].slice(-20); // Keep last 20 memories
+            await memRef.set({ facts, updatedAt: new Date() }, { merge: true });
+            console.log(`🧠 Memory Updated for ${userId}: ${extracted.length} new facts`);
+        }
+    } catch (e) { console.error('Memory Save Error:', e.message); }
+}
+
 if (bot) {
     bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ GLM AI Agent ยินดีที่ได้รู้จักครับ (Super Stable Mode)'));
     
@@ -69,27 +101,36 @@ if (bot) {
         
         try {
             if (!tgContexts.has(userId)) tgContexts.set(userId, []);
-            const recentHistory = tgContexts.get(userId).slice(-8); // Increased to 8 for better "linking"
+            const recentHistory = tgContexts.get(userId).slice(-8); 
             
-            // 1. Smart Search Triggering
-            let searchContext = "";
-            const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
-            const isNews = /ข่าว|ล่าสุด|news|update/i.test(userMsg);
-            
-            // Only search if it's weather/news OR a long specific question (>15 chars)
-            // This prevents short follow-up questions from grabbing wrong context.
-            if (isWeather || isNews || (userMsg.length > 15 && !recentHistory.length)) {
-                searchContext = await performSearch(userMsg);
-            }
+            // 1. Recall Long-term Memory & Fetch Search
+            const [personalFacts, searchData] = await Promise.all([
+                getBotMemory(userId),
+                (async () => {
+                    const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
+                    const isNews = /ข่าว|ล่าสุด|news|update/i.test(userMsg);
+                    if (isWeather || isNews || userMsg.length > 15) return await performSearch(userMsg);
+                    return "";
+                })()
+            ]);
 
-            // Build Prompt with Strict Instruction to follow history
+            // Build Prompt with Memory + Internet Knowledge
             const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
             const promptMessages = [
-                { role: 'system', content: `You are a helpful assistant. Current Thailand time: ${now}. 
-                CRITICAL: Maintain conversation continuity. Prioritize the conversation history below over any external search data.
-                If the user asks a follow-up question (e.g., "how many steps"), refer to the previous topic discussed in history.
+                { role: 'system', content: `You are an Evolving AI Assistant. 
+                Current Time: ${now}.
                 
-                ${searchContext ? `[Optional External Info]:\n${searchContext}` : ""}` },
+                ## Your Long-term Memory about this User:
+                ${personalFacts.length > 0 ? personalFacts.join('\n') : "No memories yet. Learn from the user!"}
+                
+                ## Real-time Internet Learning:
+                ${searchData || "No new internet data. Use your existing knowledge or ask if unsure."}
+
+                INSTRUCTIONS:
+                1. Use the memory to personalize the answer.
+                2. Use the internet data to provide current, accurate info.
+                3. Always learn from the user's corrections or statements.
+                4. Answer briefly but helpfully in Thai.` },
                 ...recentHistory,
                 { role: 'user', content: userMsg }
             ];
@@ -108,9 +149,12 @@ if (bot) {
             const reply = response.data.choices[0].message.content;
             if (!reply) throw new Error("Empty AI response");
 
-            // Success: Update context & Reply
+            // 3. Update Conversation & Persistent Memory
             tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
             if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
+            
+            // Background Learning
+            saveBotMemory(userId, userMsg, reply);
 
             if (reply.length > 4000) {
                 const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
@@ -120,7 +164,7 @@ if (bot) {
             }
         } catch (e) {
             console.error('❌ BOT ERROR:', e.message);
-            await ctx.reply('⚠️ ขออภัยครับ ระบบประมวลผลนานเกินไป หรือ API เกิดปัญหาชั่วคราว รบกวนลองถามใหม่อีกครั้งครับ');
+            await ctx.reply('⚠️ ระบบประมวลผลนานเกินไป หรือ API เกิดปัญหาชั่วคราว รบกวนลองใหม่อีกครั้งครับ');
         }
     });
 }
