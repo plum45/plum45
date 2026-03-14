@@ -135,19 +135,104 @@ async function handleAgentActions(userId, replyText, ctx) {
 }
 
 if (bot) {
-    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ Stacy AI Agent (Pillar Architect Mode) ยินดีที่ได้ช่วยจัดการเรื่องงานครับ'));
+    // Register commands for the menu
+    bot.telegram.setMyCommands([
+        { command: 'start', description: 'เริ่มใช้งาน Stacy' },
+        { command: 'help', description: 'วิธีใช้งานและคำสั่งทั้งหมด' },
+        { command: 'schedule', description: 'ดูตารางงานที่จดไว้' },
+        { command: 'logs', description: 'ดูบันทึกเวลางานล่าสุด' },
+        { command: 'memory', description: 'ดูว่า Stacy จำอะไรเกี่ยวกับคุณได้บ้าง' },
+        { command: 'status', description: 'เช็คสถานะระบบและการเชื่อมต่อ' },
+        { command: 'clear', description: 'ล้างประวัติการคุยปัจจุบัน' }
+    ]);
+
+    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ Stacy AI Agent (Pillar Architect Mode) ยินดีที่ได้ช่วยจัดการเรื่องงานครับ\n\nพิมพ์ /help เพื่อดูวิธีใช้งานทั้งหมดครับ'));
     
-    // View Schedule Command
+    bot.help((ctx) => {
+        const helpText = `🛠️ **คู่มือการใช้งาน Stacy AI Agent**
+
+**1. ระบบจัดการงาน (Task & Calendar)**
+- "ช่วยจดงานหน่อย พรุ่งนี้ 10 โมงมีประชุม" -> บันทึกในบอท
+- "ลงนัดใน Calendar ให้หน่อย..." -> ส่งเข้า Google Calendar (ต้องต่อ Webhook)
+- /schedule -> ดูรายการงานทั้งหมด
+
+**2. ระบบลงเวลางาน (Work Log)**
+- "ลงเวลางานหน่อยว่าเริ่มทำโปรเจกต์แล้ว"
+- /logs -> ดูประวัติการลงเวลาล่าสุด
+
+**3. ข้าพเจ้าจำคุณได้ (Memory)**
+- ผมจะจำสิ่งที่สำคัญเกี่ยวกับคุณเพื่อปรับจูนคำตอบ
+- /memory -> ตรวจสอบสิ่งที่ผมจำไว้ได้
+
+**4. คำสั่งเชิงเทคนิค**
+- /status -> เช็คการเชื่อมต่อ
+- /clear -> รีเซ็ตบทสนทนาปัจจุบัน
+- /ping -> เช็คความเร็วบอท
+
+ต้องการให้ช่วยอะไร พิมพ์บอกมาได้เลยครับ!`;
+        ctx.reply(helpText);
+    });
+
     bot.command('schedule', async (ctx) => {
         const userId = ctx.from.id;
-        const snapshot = await db.collection('userActivities').doc(String(userId)).collection('tasks').limit(10).get();
-        if (snapshot.empty) return ctx.reply('📭 คุณยังไม่มีงานในตารางครับ');
-        let text = "📅 **ตารางงานของคุณ:**\n";
-        snapshot.forEach(doc => {
-            const task = doc.data();
-            text += `- [ ] ${task.title} (${task.time || 'ไม่ระบุเวลา'})\n`;
-        });
-        ctx.reply(text);
+        try {
+            const snapshot = await db.collection('userActivities').doc(String(userId)).collection('tasks')
+                .orderBy('createdAt', 'desc').limit(10).get();
+            if (snapshot.empty) return ctx.reply('📭 คุณยังไม่มีงานในตารางครับ');
+            let text = "📅 **ตารางงานล่าสุดของคุณ:**\n\n";
+            snapshot.forEach(doc => {
+                const task = doc.data();
+                text += `📌 ${task.title} | ${task.time || 'ไม่ระบุเวลา'}\n`;
+            });
+            ctx.reply(text);
+        } catch (e) {
+            ctx.reply('❌ ไม่สามารถดึงตารางงานได้ในขณะนี้ครับ');
+        }
+    });
+
+    bot.command('logs', async (ctx) => {
+        const userId = ctx.from.id;
+        try {
+            const snapshot = await db.collection('userActivities').doc(String(userId)).collection('logs')
+                .orderBy('timestamp', 'desc').limit(10).get();
+            if (snapshot.empty) return ctx.reply('📭 ยังไม่มีบันทึกข้อมูลครับ');
+            let text = "📝 **บันทึกกิจกรรมล่าสุด:**\n\n";
+            snapshot.forEach(doc => {
+                const log = doc.data();
+                const time = log.timestamp.toDate().toLocaleString('th-TH');
+                text += `🔹 [${time}] ${log.content}\n`;
+            });
+            ctx.reply(text);
+        } catch (e) {
+            ctx.reply('❌ ไม่สามารถดึงบันทึกได้ครับ');
+        }
+    });
+
+    bot.command('memory', async (ctx) => {
+        const userId = ctx.from.id;
+        const facts = await getBotMemory(userId);
+        if (!facts.length) return ctx.reply('🤫 ตอนนี้ผมยังไม่มีบันทึกความจำพิเศษเกี่ยวกับคุณครับ คุยกับผมบ่อยๆ นะ!');
+        ctx.reply(`🧠 **สิ่งที่ Stacy จำเกี่ยวกับคุณได้:**\n\n${facts.join('\n')}`);
+    });
+
+    bot.command('clear', (ctx) => {
+        const userId = ctx.from.id;
+        tgContexts.delete(userId);
+        ctx.reply('🧹 ล้างประวัติการคุยปัจจุบันเรียบร้อยครับ (ความจำถาวรยังอยู่นะ!)');
+    });
+
+    bot.command('status', async (ctx) => {
+        const userId = ctx.from.id;
+        const userDoc = await db.collection('userActivities').doc(String(userId)).get();
+        const hasWebhook = userDoc.exists && userDoc.data().webhookUrl;
+        
+        const statusText = `📡 **สถานะระบบ Stacy**
+- 🟢 Engine: Moonshot Kimi K2 (Active)
+- 🟢 Backend: Render Cloud
+- 🟢 Database: Firebase Cloud Sync
+- ${hasWebhook ? '🟢 Webhook: Connected (Calendar Ready)' : '🔴 Webhook: Not Set (Calendar Disabled)'}
+- 🕒 Timezone: Asia/Bangkok`;
+        ctx.reply(statusText);
     });
     
     // Webhook Route
