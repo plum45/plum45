@@ -22,9 +22,17 @@ try {
     const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
 
     if (serviceAccountEnv) {
-        adminConfig.credential = admin.credential.cert(JSON.parse(serviceAccountEnv));
-        if (admin.apps.length === 0) admin.initializeApp(adminConfig);
-        console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV");
+        let parsedCreds;
+        try {
+            // Support both direct JSON and escaped string formats
+            parsedCreds = JSON.parse(serviceAccountEnv.replace(/\\n/g, '\n'));
+            adminConfig.credential = admin.credential.cert(parsedCreds);
+            if (admin.apps.length === 0) admin.initializeApp(adminConfig);
+            console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV (Resilient Mode)");
+        } catch (jsonErr) {
+            console.error("❌ Firebase ENV Parse Error:", jsonErr.message);
+            if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
+        }
     } else if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
         if (admin.apps.length === 0) admin.initializeApp(adminConfig);
