@@ -62,7 +62,7 @@ try {
     }
 } catch (e) {
     if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-    firebaseStatus = "❌ Init Failed";
+    firebaseStatus = `❌ Init Failed: ${e.message}`;
     console.error("❌ Firebase Initialization Error:", e.message);
 }
 const db = admin.firestore();
