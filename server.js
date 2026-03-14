@@ -21,19 +21,25 @@ const adminConfig = { projectId: "ai--agent-12d7a" };
 try {
     const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
     const serviceAccountEnv = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+    const directPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
 
-    if (serviceAccountEnv) {
+    if (directPrivateKey) {
+        // Most reliable way: manually construct the creds from known values
+        adminConfig.credential = admin.credential.cert({
+            projectId: "ai--agent-12d7a",
+            clientEmail: "firebase-adminsdk-fbsvc@ai--agent-12d7a.iam.gserviceaccount.com",
+            privateKey: directPrivateKey.replace(/\\n/g, '\n')
+        });
+        if (admin.apps.length === 0) admin.initializeApp(adminConfig);
+        firebaseStatus = "🟢 Private Key Active";
+        console.log("✅ Firebase Admin: Cloud Sync Enabled via Direct Key");
+    } else if (serviceAccountEnv) {
         let parsedCreds;
         try {
-            // Super clean: Remove control characters and whitespace that might break JSON
-            let cleanEnv = serviceAccountEnv.trim();
-            // Remove non-printable characters (common copy-paste issue)
-            cleanEnv = cleanEnv.replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
-            
+            let cleanEnv = serviceAccountEnv.trim().replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
             if ((cleanEnv.startsWith('"') && cleanEnv.endsWith('"')) || (cleanEnv.startsWith("'") && cleanEnv.endsWith("'"))) {
                 cleanEnv = cleanEnv.substring(1, cleanEnv.length - 1);
             }
-            
             parsedCreds = JSON.parse(cleanEnv.replace(/\\n/g, '\n'));
             adminConfig.credential = admin.credential.cert(parsedCreds);
             if (admin.apps.length === 0) admin.initializeApp(adminConfig);
@@ -42,12 +48,7 @@ try {
         } catch (jsonErr) {
             console.error("❌ Firebase ENV Error:", jsonErr.message);
             if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-            // Show a hint in the status if it's a common mistake
-            if (jsonErr.message.includes("Unexpected token")) {
-                firebaseStatus = "⚠️ Format Error (Copy the WHOLE code)";
-            } else {
-                firebaseStatus = `⚠️ ${jsonErr.message}`;
-            }
+            firebaseStatus = `⚠️ ${jsonErr.message}`;
         }
     } else if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
