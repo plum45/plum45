@@ -85,24 +85,37 @@ if (bot) {
                 max_tokens: 1024
             }, {
                 headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-                timeout: 25000 // Render allows longer than 10s! Setting to 25s.
+                timeout: 30000 // Increased to 30s for Render stability
             });
 
             const reply = response.data.choices[0].message.content;
+            if (!reply) throw new Error("AI returned an empty response.");
+
             tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
             if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
 
-            await ctx.reply(reply);
+            // Split message if too long for Telegram (4096 chars)
+            if (reply.length > 4000) {
+                const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
+                for (const chunk of chunks) {
+                    await ctx.reply(chunk);
+                }
+            } else {
+                await ctx.reply(reply);
+            }
         } catch (e) {
-            console.error('❌ AI Error:', e.message);
-            await ctx.reply('⚠️ ขออภัยครับ ระบบใช้เวลาประมวลผลนานเกินไป หรือเกิดข้อผิดพลาด');
+            console.error('❌ AI ERROR DETAIL:', e.response?.data || e.message);
+            const errorType = e.code === 'ECONNABORTED' ? 'ใช้เวลาคิดนานเกินไป (30s)' : (e.response?.status === 401 ? 'API Key ไม่ถูกต้อง' : 'เกิดข้อผิดพลาดทางเทคนิค');
+            await ctx.reply(`⚠️ ขออภัยครับ: ${errorType}\n(รายละเอียด: ${e.message.substring(0, 50)}...)`);
         }
     });
 }
 
 // ========== Config (use ENV for security) ==========
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
+const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY && process.env.NVIDIA_API_KEY.length > 10) 
+    ? process.env.NVIDIA_API_KEY 
+    : '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';
 const OPENAQ_API_KEY = process.env.OPENAQ_API_KEY || 'YOUR-OPENAQ-API-KEY'; // Replace with your key
 const OPENAQ_API_URL = 'https://api.openaq.org/v3';
 
