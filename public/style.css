@@ -911,11 +911,13 @@ button {
   flex-direction: column;
   z-index: 55;
   overflow: hidden;
-  transition: width .35s var(--ease-out)
+  visibility: hidden;
+  transition: width .35s var(--ease-out), visibility .35s var(--ease-out);
 }
 
 .art-panel.open {
-  width: 520px
+  width: 520px;
+  visibility: visible;
 }
 
 .art-head {
@@ -996,12 +998,14 @@ button {
   justify-content: center;
   opacity: 0;
   pointer-events: none;
-  transition: opacity .2s var(--ease)
+  visibility: hidden;
+  transition: opacity .2s var(--ease), visibility .2s var(--ease);
 }
 
 .modal-bg.vis {
   opacity: 1;
-  pointer-events: auto
+  pointer-events: auto;
+  visibility: visible;
 }
 
 .modal {
@@ -1295,12 +1299,39 @@ button {
     left: 8px;
   }
 
+  /* Artifact panel: only cover screen when actually open */
+  /* Artifact panel: only cover screen when actually open */
   .art-panel {
     position: fixed;
-    inset: 0;
-    width: 100% !important;
-    height: 100% !important;
+    top: 0;
+    right: 0;
+    width: 0 !important;
+    height: calc(var(--vh, 1vh) * 100);
     z-index: 2000;
+    transition: width .3s var(--ease-out);
+    pointer-events: none;
+    visibility: hidden;
+  }
+
+  .art-panel.open {
+    width: 100% !important;
+    pointer-events: auto;
+    visibility: visible;
+  }
+
+  .main {
+    height: calc(var(--vh, 1vh) * 100);
+    height: -webkit-fill-available;
+  }
+
+  .chat-area {
+    padding-bottom: 20px;
+  }
+
+  .inp-wrap {
+    z-index: 50; /* Above message bubbles but below modals */
+    background: var(--bg-1);
+    position: relative;
   }
 
   .sug-grid {
@@ -1318,7 +1349,6 @@ button {
 
   .msg-tx {
     font-size: 0.95rem;
-    /* Slightly larger for readability on small screens */
   }
 
   .inp-wrap {
@@ -1335,10 +1365,26 @@ button {
     white-space: nowrap;
   }
 
+  /* Modals: scrollable on small screens */
+  .modal-bg {
+    padding: 16px;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
   .modal {
-    width: 90%;
+    width: 100%;
     max-width: 400px;
     margin: auto;
+    max-height: 85vh;
+    overflow-y: auto;
+  }
+
+  .modal-top {
+    position: sticky;
+    top: 0;
+    background: var(--bg-2);
+    z-index: 1;
   }
 
   .ctrl-row label {

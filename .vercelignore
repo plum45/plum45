@@ -6,3 +6,7 @@ node_modules
 AppData
 Local
 *.sock
+test-*.js
+list-models.js
+out.html
+out.json

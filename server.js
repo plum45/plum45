@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 const axios = require('axios');
@@ -6,6 +7,13 @@ const cron = require('node-cron');
 const cheerio = require('cheerio');
 const admin = require('firebase-admin');
 const fs = require('fs');
+const { Telegraf } = require('telegraf');
+
+// ========== Global Bot Status ==========
+let tgBotStatus = "Initializing";
+let tgBotError = null;
+const IS_RENDER = !!process.env.RENDER;
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.onrender.com
 
 // Initialize Firebase Admin
 let adminConfig = { projectId: "ai--agent-12d7a" };
@@ -34,11 +42,71 @@ app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
+// ========== Telegram Bot Setup (Render/Vercel Compatible) ==========
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
+const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN) : null;
+const tgContexts = new Map();
+
+if (bot) {
+    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ GLM AI Agent ยินดีที่ได้รู้จักครับ (Render Mode)'));
+    
+    // Webhook Route
+    app.post('/api/telegram-webhook', async (req, res) => {
+        try {
+            await bot.handleUpdate(req.body, res);
+        } catch (err) {
+            console.error('Webhook Error:', err);
+            if (!res.writableEnded) res.status(200).send('OK');
+        }
+    });
+
+    // 1. Connectivity Commands
+    bot.command('ping', (ctx) => ctx.reply('Pong! 🏓 ระบบออนไลน์ปกติครับ'));
+    bot.on('text', async (ctx) => {
+        const userId = ctx.from.id;
+        const userMsg = ctx.message.text;
+
+        if (userMsg.toLowerCase() === 'test') return ctx.reply('✅ บอทได้รับข้อความแล้ว!');
+
+        await ctx.sendChatAction('typing');
+        
+        try {
+            if (!tgContexts.has(userId)) tgContexts.set(userId, []);
+            const recentHistory = tgContexts.get(userId).slice(-6);
+            
+            const response = await axios.post(NVIDIA_API_URL, {
+                model: 'z-ai/glm4.7',
+                messages: [
+                    { role: 'system', content: "You are a helpful assistant. Answer briefly in Thai." },
+                    ...recentHistory,
+                    { role: 'user', content: userMsg }
+                ],
+                temperature: 0.7,
+                max_tokens: 1024
+            }, {
+                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+                timeout: 25000 // Render allows longer than 10s! Setting to 25s.
+            });
+
+            const reply = response.data.choices[0].message.content;
+            tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
+            if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
+
+            await ctx.reply(reply);
+        } catch (e) {
+            console.error('❌ AI Error:', e.message);
+            await ctx.reply('⚠️ ขออภัยครับ ระบบใช้เวลาประมวลผลนานเกินไป หรือเกิดข้อผิดพลาด');
+        }
+    });
+}
+
 // ========== Config (use ENV for security) ==========
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 const OPENAQ_API_KEY = process.env.OPENAQ_API_KEY || 'YOUR-OPENAQ-API-KEY'; // Replace with your key
 const OPENAQ_API_URL = 'https://api.openaq.org/v3';
+
+const DEFAULT_MODEL = 'z-ai/glm5';
 
 const SYSTEM_PROMPT_CODING = `You are Qwen, an expert AI coding agent built on Qwen 3.5-122B. You are a pair programmer and software architect who writes production-ready code.
 
@@ -62,7 +130,7 @@ const SYSTEM_PROMPT_CODING = `You are Qwen, an expert AI coding agent built on Q
 - **Refactor**: Suggest architectural improvements and cleaner patterns.
 - **Explain**: Break down complex systems with diagrams (using markdown), tables, and analogies.
 - **Review code**: Point out bugs, security issues, performance problems, and suggest fixes.
-- **Real-time Data**: If WEB SEARCH CONTEXT is provided in the user's message, YOU MUST use it to answer the question. Do not say you don't have real-time data.
+- **Real-time Data**: If [CRITICAL REAL-TIME DATA] is provided, YOU MUST use it. If you are asked about real-time events (weather, news, stocks) and NO search context is provided or search failed, clearly state that you do not have live access to that information currently instead of using outdated training data.
 
 ## Response Format:
 - Start with a **brief explanation** of your approach (1-3 sentences).
@@ -80,7 +148,9 @@ const SYSTEM_PROMPT_AGENT = `You are Qwen, a highly intelligent and helpful AI a
 - You think step-by-step to provide accurate and detailed answers.
 - You respond in the same language the user writes in (e.g., Thai → Thai, English → English).
 - Be polite, professional, and helpful.
-- When given [CRITICAL REAL-TIME DATA] or other search contexts, always incorporate that data smoothly into your response without apologizing for lacking real-time capabilities. Your answers should sound confident based on the provided data.
+- CRITICAL: You MUST compare [CURRENT DATE & TIME] with any search results you find. If you find data for a different year or month than the current one, inform the user it is old and emphasize you are looking for current data.
+- For weather: NEVER guess or use internal knowledge. Only use [CRITICAL REAL-TIME DATA]. If no current data is found for the current date, say you don't know yet.
+- When given [CRITICAL REAL-TIME DATA], incorporate it smoothly. If search returns no current results, tell the user you don't have up-to-the-minute information for that topic instead of relying on outdated internal knowledge.
 
 ## Response Format:
 - Use simple, easy-to-read formatting.
@@ -88,16 +158,64 @@ const SYSTEM_PROMPT_AGENT = `You are Qwen, a highly intelligent and helpful AI a
 - Use tables or bullet points for structured data.`;
 
 // ========== Context Management ==========
-function trimMessages(messages, maxTokenEstimate = 12000) {
-    let totalChars = 0;
-    const trimmed = [];
+function trimMessages(messages, maxChars = 100000) {
+    if (!messages || messages.length === 0) return [];
+
+    // Always keep the first user message (topic anchor)
+    const firstUserMsg = messages.find(m => m.role === 'user');
+
+    // Calculate total chars
+    let totalChars = messages.reduce((sum, m) => sum + (m.content?.length || 0), 0);
+
+    // If everything fits, return as-is
+    if (totalChars <= maxChars) return messages;
+
+    // Strategy: keep first user msg + as many recent messages as possible
+    const result = [];
+    let usedChars = 0;
+
+    // Collect recent messages (from newest to oldest)
+    const recentMsgs = [];
     for (let i = messages.length - 1; i >= 0; i--) {
-        const msgChars = messages[i].content.length;
-        if (totalChars + msgChars > maxTokenEstimate * 4 && trimmed.length >= 4) break;
-        totalChars += msgChars;
-        trimmed.unshift(messages[i]);
+        const msgLen = messages[i].content?.length || 0;
+        if (usedChars + msgLen > maxChars * 0.85 && recentMsgs.length >= 6) break;
+        usedChars += msgLen;
+        recentMsgs.unshift(messages[i]);
     }
-    return trimmed;
+
+    // Check if first user message is already included
+    const firstMsgIncluded = firstUserMsg && recentMsgs.some(
+        m => m.role === firstUserMsg.role && m.content === firstUserMsg.content
+    );
+
+    // Count how many messages were trimmed
+    const trimmedCount = messages.length - recentMsgs.length;
+
+    if (trimmedCount > 0) {
+        // Summarize what was cut
+        const trimmedMsgs = messages.slice(0, messages.length - recentMsgs.length);
+        const topics = trimmedMsgs
+            .filter(m => m.role === 'user')
+            .map(m => m.content.substring(0, 80))
+            .slice(0, 5);
+
+        const summaryText = `[CONVERSATION CONTEXT: This chat has ${messages.length} messages total. ` +
+            `The earlier ${trimmedCount} messages were condensed. ` +
+            `Earlier topics discussed: ${topics.join(' | ')}. ` +
+            `Continue the conversation naturally, maintaining awareness of previous context.]`;
+
+        result.push({ role: 'user', content: summaryText });
+        result.push({ role: 'assistant', content: 'Understood. I remember our earlier discussion and will maintain continuity.' });
+
+        // Add first user message if not in recent (for topic memory)
+        if (!firstMsgIncluded && firstUserMsg) {
+            result.push({ role: 'user', content: `[Original first message]: ${firstUserMsg.content.substring(0, 300)}` });
+            result.push({ role: 'assistant', content: 'I recall this was how our conversation started.' });
+        }
+    }
+
+    result.push(...recentMsgs);
+    return result;
 }
 
 // ========== Server-Side Scheduler ==========
@@ -167,23 +285,40 @@ async function getAirQuality(locationIdOrCity) {
     }
 }
 
-async function runQuery(query) {
-    const response = await axios.post(NVIDIA_API_URL, {
-        model: 'qwen/qwen3.5-122b-a10b',
-        messages: [
-            { role: 'system', content: SYSTEM_PROMPT_AGENT },
-            { role: 'user', content: query },
-        ],
-        max_tokens: 4096,
-        temperature: 0.6,
-        top_p: 0.95,
-        stream: false,
-        chat_template_kwargs: { enable_thinking: false },
-    }, {
-        headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Accept': 'application/json' },
-        timeout: 60000,
+async function callNvidiaAPI({ model, messages, max_tokens, temperature, top_p, stream = false, enable_thinking = false }) {
+    const payload = {
+        model: model || DEFAULT_MODEL,
+        messages,
+        max_tokens: max_tokens || 4096,
+        temperature: temperature ?? 1,
+        top_p: top_p ?? 1,
+        stream,
+        chat_template_kwargs: { enable_thinking, clear_thinking: false },
+    };
+
+    return axios.post(NVIDIA_API_URL, payload, {
+        headers: {
+            'Authorization': `Bearer ${NVIDIA_API_KEY}`,
+            'Accept': stream ? 'text/event-stream' : 'application/json'
+        },
+        responseType: stream ? 'stream' : 'json',
+        timeout: stream ? 120000 : 30000,
     });
-    return response.data?.choices?.[0]?.message?.content || 'No response';
+}
+
+async function runQuery(query) {
+    try {
+        const response = await callNvidiaAPI({
+            messages: [
+                { role: 'system', content: SYSTEM_PROMPT_AGENT },
+                { role: 'user', content: query },
+            ]
+        });
+        return response.data?.choices?.[0]?.message?.content || 'No response';
+    } catch (e) {
+        console.error("runQuery Error:", e.message);
+        return 'Error running query';
+    }
 }
 
 // ========== Schedule API Endpoints ==========
@@ -230,6 +365,115 @@ app.delete('/api/schedules/:id', async (req, res) => {
     } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ========== Bot Status Endpoint ==========
+app.get('/api/telegram-status', (req, res) => {
+    res.json({
+        status: tgBotStatus,
+        error: tgBotError,
+        token_found: !!process.env.TELEGRAM_TOKEN,
+        mode: process.env.VERCEL ? 'Webhook (Vercel)' : 'Polling (Local)',
+        setup_url: process.env.VERCEL ? `${req.protocol}://${req.get('host')}/api/telegram-setup` : null
+    });
+});
+
+// ========== Webhook Setup Endpoint (Run once after deploy) ==========
+app.get('/api/telegram-setup', async (req, res) => {
+    if (!process.env.TELEGRAM_TOKEN) return res.send("Error: TELEGRAM_TOKEN missing in Environment Variables");
+    try {
+        const host = req.get('host');
+        const webhookUrl = `https://${host}/api/telegram-webhook`;
+        const bot = new Telegraf(process.env.TELEGRAM_TOKEN);
+        await bot.telegram.setWebhook(webhookUrl);
+        res.send(`✅ Webhook registration successful! Bot will now receive messages at: ${webhookUrl}`);
+    } catch (e) {
+        res.status(500).send(`❌ Webhook failed: ${e.message}`);
+    }
+});
+
+// ========== Reusable Search Function ==========
+async function performSearch(userQuery) {
+    try {
+        console.log(`🌐 Performing Multi-Stage Real-time Search for: "${userQuery}"`);
+        const isWeatherQuery = /สภาพอากาศ|ฝน|ตกไหม|พยากรณ์|weather|rain|temp|อุณหภูมิ/i.test(userQuery);
+        let weatherData = "";
+        let searchResults = [];
+
+        // 1. Precise Weather (Geocoding + Open-Meteo)
+        if (isWeatherQuery) {
+            try {
+                const cityMatch = userQuery.match(/(ที่|ใน|เมือง|แถว)\s*([ก-๙a-zA-Z\s]+)/);
+                const city = cityMatch ? cityMatch[2].trim() : "Bangkok";
+                const geoRes = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1`, {
+                    headers: { 'User-Agent': 'QwenChat/1.0' },
+                    timeout: 5000
+                });
+                if (geoRes.data?.length > 0) {
+                    const { lat, lon, display_name } = geoRes.data[0];
+                    const wRes = await axios.get(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,precipitation,rain,showers,weather_code,cloud_cover,wind_speed_10m&timezone=auto`, { timeout: 5000 });
+                    const cur = wRes.data.current;
+                    weatherData = `[EXACT WEATHER DATA for ${display_name}]:
+- Current Temp: ${cur.temperature_2m}°C (Feels like ${cur.apparent_temperature}°C)
+- Humidity: ${cur.relative_humidity_2m}%
+- Condition: ${cur.rain > 0 ? 'Rainy' : cur.showers > 0 ? 'Showers' : cur.cloud_cover > 50 ? 'Cloudy' : 'Clear'}
+- Wind: ${cur.wind_speed_10m} km/h
+(Data as of: ${new Date().toLocaleString('th-TH')})\n\n`;
+                }
+            } catch (e) { console.error('Weather logic failed:', e.message); }
+        }
+
+        // Bypass search for very short messages or greetings
+        if (userQuery.length < 5 || /สวัสดี|hi|hello|ดีครับ|ดีค่ะ/i.test(userQuery)) {
+            return "";
+        }
+
+        // 2. Parallel Web Search (DDG + Google) - Ultra Fast for Vercel
+        const searchPromises = [
+            async () => {
+                const res = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(userQuery)}`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0' },
+                    timeout: 2500
+                });
+                const $ = cheerio.load(res.data);
+                const localResults = [];
+                $('.result__body').each((i, el) => {
+                    if (i < 2) {
+                        const t = $(el).find('.result__a').text().trim(), s = $(el).find('.result__snippet').text().trim();
+                        if (t && s) localResults.push(`[Source: Web] ${t}: ${s}`);
+                    }
+                });
+                return localResults;
+            },
+            async () => {
+                const res = await axios.get(`https://www.google.com/search?q=${encodeURIComponent(userQuery)}&hl=th`, {
+                    headers: { 'User-Agent': 'Mozilla/5.0' },
+                    timeout: 2500
+                });
+                const $ = cheerio.load(res.data);
+                const localResults = [];
+                $('div.g').each((i, el) => {
+                    if (i < 2) {
+                        const t = $(el).find('h3').text().trim(), s = $(el).find('div.VwiC3b').text().trim();
+                        if (t && s) localResults.push(`[Source: Google] ${t}: ${s}`);
+                    }
+                });
+                return localResults;
+            }
+        ];
+
+        const allResults = await Promise.allSettled(searchPromises.map(p => p()));
+        allResults.forEach(r => {
+            if (r.status === 'fulfilled' && r.value) searchResults.push(...r.value);
+        });
+
+        if (weatherData || searchResults.length > 0) {
+            return `\n\n[CRITICAL REAL-TIME DATA]:\n${weatherData}${searchResults.join('\n\n')}\n`;
+        }
+        return `\n\n[SYSTEM NOTE: Web search returned no results. Inform the user you cannot fetch real-time info right now.]\n`;
+    } catch (e) {
+        return `\n\n[SYSTEM NOTE: Search FAILED due to technical error.]\n`;
+    }
+}
+
 // ========== Chat Endpoint with Retry ==========
 app.post('/api/chat', async (req, res) => {
     const { messages, temperature = 0.6, top_p = 0.95, max_tokens = 16384, enable_thinking = true, web_search = false, mode = 'coding' } = req.body;
@@ -242,70 +486,33 @@ app.post('/api/chat', async (req, res) => {
     if (web_search) {
         const lastMsg = messages[messages.length - 1];
         if (lastMsg && lastMsg.role === 'user') {
-            try {
-                // Check if it's an Air Quality related query
-                const isAQ = /ฝุ่น|PM2\.5|อากาศ|AQI|air quality/i.test(lastMsg.content);
-                let aqData = null;
-
-                if (isAQ && OPENAQ_API_KEY !== 'YOUR-OPENAQ-API-KEY') {
-                    // Try to extract city name (simple heuristic)
-                    const cityMatch = lastMsg.content.match(/(ที่|ใน|เมือง)\s*([ก-๙a-zA-Z]+)/);
-                    const city = cityMatch ? cityMatch[2] : "Bangkok";
-                    aqData = await getAirQuality(city);
-                }
-
-                console.log(`🌐 Performing Web Search for: "${lastMsg.content}"`);
-
-                const ddgRes = await axios.post(`https://lite.duckduckgo.com/lite/`, 'q=' + encodeURIComponent(lastMsg.content), {
-                    headers: {
-                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                        'Content-Type': 'application/x-www-form-urlencoded'
-                    },
-                    timeout: 8000
-                });
-
-                const $ = cheerio.load(ddgRes.data);
-                const results = [];
-                $('.result-snippet').each((i, el) => {
-                    const description = $(el).text().trim();
-                    const title = $(el).parent().prev().find('.result-link').text().trim();
-                    if (description.length > 5) results.push(`Title: ${title}\nDescription: ${description}`);
-                });
-
-                if (results.length > 0 || aqData) {
-                    const topResults = results.slice(0, 5).join('\n\n');
-                    const aqSnippet = aqData ? `[AIR QUALITY DATA FROM OPENAQ]:\n${aqData}\n\n` : "";
-                    console.log(`✅ Search found ${results.length} results.`);
-                    searchContextStr = `\n\n[CRITICAL REAL-TIME DATA]:\nYou MUST use the following data to answer the user's upcoming question. DO NOT apologize or say you don't have real-time access. The system has provided this data for you.\n\n${aqSnippet}${topResults}\n`;
-                } else {
-                    console.log('⚠️ Search returned no results.');
-                }
-            } catch (e) { console.error('❌ Web search failed:', e.message); }
+            searchContextStr = await performSearch(lastMsg.content);
         }
     }
 
     const trimmedMessages = trimMessages(messages);
     const selectedPrompt = mode === 'agent' ? SYSTEM_PROMPT_AGENT : SYSTEM_PROMPT_CODING;
+    const toolsPrompt = !process.env.VERCEL ? FILE_TOOLS_PROMPT : '';
+
+    // Calculate current time in Thailand
+    const now = new Date();
+    const thaiTime = now.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', dateStyle: 'full', timeStyle: 'medium' });
+    const timeContext = `\n\n[CURRENT DATE & TIME]: ${thaiTime}\n`;
+
     const fullMessages = [
-        { role: 'system', content: selectedPrompt + searchContextStr },
+        { role: 'system', content: selectedPrompt + toolsPrompt + timeContext + searchContextStr },
         ...trimmedMessages
     ];
-
-    const payload = {
-        model: req.body.model || 'qwen/qwen3.5-122b-a10b',
-        messages: fullMessages,
-        max_tokens, temperature, top_p,
-        stream: true,
-        chat_template_kwargs: { enable_thinking },
-    };
 
     const maxRetries = 2;
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
         try {
-            const response = await axios.post(NVIDIA_API_URL, payload, {
-                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Accept': 'text/event-stream' },
-                responseType: 'stream',
-                timeout: 120000,
+            const response = await callNvidiaAPI({
+                model: req.body.model,
+                messages: fullMessages,
+                max_tokens, temperature, top_p,
+                stream: true,
+                enable_thinking
             });
 
             res.setHeader('Content-Type', 'text/event-stream');
@@ -337,17 +544,13 @@ app.post('/api/generate-title', async (req, res) => {
     const { message } = req.body;
     if (!message) return res.status(400).json({ error: 'Message required' });
     try {
-        const response = await axios.post(NVIDIA_API_URL, {
-            model: req.body.model || 'qwen/qwen3.5-122b-a10b',
+        const response = await callNvidiaAPI({
+            model: req.body.model,
             messages: [
                 { role: 'system', content: 'Generate a very short title (max 6 words) for this conversation. Return ONLY the title, nothing else. No quotes.' },
                 { role: 'user', content: message },
             ],
-            max_tokens: 30, temperature: 0.3, top_p: 0.9, stream: false,
-            chat_template_kwargs: { enable_thinking: false },
-        }, {
-            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Accept': 'application/json' },
-            timeout: 15000,
+            max_tokens: 30, temperature: 0.3, top_p: 0.9,
         });
         res.json({ title: response.data?.choices?.[0]?.message?.content?.trim() || 'New Chat' });
     } catch (error) {
@@ -357,13 +560,213 @@ app.post('/api/generate-title', async (req, res) => {
 
 // Health check
 app.get('/api/health', (req, res) => {
+    const isLocal = !process.env.VERCEL;
     res.json({
         status: 'ok',
-        model: 'qwen/qwen3.5-122b-a10b',
-        features: ['streaming', 'thinking', 'smart-titles', 'retry', 'scheduler'],
-        activeSchedules: schedules.filter(s => s.active).length,
+        model: DEFAULT_MODEL,
+        features: ['streaming', 'thinking', 'smart-titles', 'retry', 'scheduler', ...(isLocal ? ['file-tools'] : [])],
+        activeSchedules: Object.keys(activeJobs).length,
         uptime: process.uptime(),
     });
+});
+
+// ========== File System Tools (Local Only) ==========
+const USER_HOME = process.env.USERPROFILE || process.env.HOME || 'C:\\Users';
+const BLOCKED_PATHS = ['windows', 'system32', 'program files', 'programdata', '$recycle', 'appdata\\local\\temp'];
+const BLOCKED_EXTENSIONS = ['.exe', '.dll', '.sys', '.bat', '.cmd', '.ps1', '.reg', '.msi'];
+
+function isPathSafe(targetPath) {
+    const normalized = path.resolve(targetPath).toLowerCase();
+    // Block system-critical paths
+    if (BLOCKED_PATHS.some(bp => normalized.includes(bp))) return false;
+    return true;
+}
+
+function isWriteSafe(targetPath) {
+    if (!isPathSafe(targetPath)) return false;
+    const ext = path.extname(targetPath).toLowerCase();
+    if (BLOCKED_EXTENSIONS.includes(ext)) return false;
+    return true;
+}
+
+// List directory
+app.post('/api/tools/list-dir', (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { dirPath } = req.body;
+    const target = path.resolve(dirPath || USER_HOME);
+    if (!isPathSafe(target)) return res.status(403).json({ error: 'Access denied to this path' });
+
+    try {
+        const items = fs.readdirSync(target, { withFileTypes: true }).slice(0, 100);
+        const result = items.map(item => {
+            const fullPath = path.join(target, item.name);
+            let size = null;
+            try { if (item.isFile()) size = fs.statSync(fullPath).size; } catch (e) { }
+            return { name: item.name, isDir: item.isDirectory(), size };
+        });
+        res.json({ path: target, items: result });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Read file
+app.post('/api/tools/read-file', (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { filePath, maxChars } = req.body;
+    const target = path.resolve(filePath);
+    if (!isPathSafe(target)) return res.status(403).json({ error: 'Access denied to this path' });
+
+    try {
+        const stat = fs.statSync(target);
+        if (stat.size > 2 * 1024 * 1024) return res.status(400).json({ error: 'File too large (>2MB)' });
+        const content = fs.readFileSync(target, 'utf-8').substring(0, maxChars || 50000);
+        res.json({ path: target, size: stat.size, content });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Search files
+app.post('/api/tools/search', (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { query, searchPath, maxDepth } = req.body;
+    const target = path.resolve(searchPath || USER_HOME);
+    if (!isPathSafe(target)) return res.status(403).json({ error: 'Access denied' });
+
+    const results = [];
+    const depth = maxDepth || 3;
+
+    function walk(dir, level) {
+        if (level > depth || results.length >= 50) return;
+        try {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+                if (results.length >= 50) break;
+                if (item.name.startsWith('.') || item.name === 'node_modules') continue;
+                const full = path.join(dir, item.name);
+                if (item.name.toLowerCase().includes(query.toLowerCase())) {
+                    results.push({ name: item.name, path: full, isDir: item.isDirectory() });
+                }
+                if (item.isDirectory() && !BLOCKED_PATHS.some(bp => full.toLowerCase().includes(bp))) {
+                    walk(full, level + 1);
+                }
+            }
+        } catch (e) { /* skip inaccessible dirs */ }
+    }
+
+    walk(target, 0);
+    res.json({ query, searchPath: target, results });
+});
+
+// Create file
+app.post('/api/tools/create-file', (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { filePath, content } = req.body;
+    const target = path.resolve(filePath);
+    if (!isWriteSafe(target)) return res.status(403).json({ error: 'Cannot create this file type or path' });
+
+    try {
+        const dir = path.dirname(target);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        if (fs.existsSync(target)) return res.status(400).json({ error: 'File already exists. Use move/rename instead.' });
+        fs.writeFileSync(target, content || '', 'utf-8');
+        res.json({ success: true, path: target });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Move/rename file
+app.post('/api/tools/move-file', (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { from, to } = req.body;
+    const fromPath = path.resolve(from);
+    const toPath = path.resolve(to);
+    if (!isPathSafe(fromPath) || !isWriteSafe(toPath)) return res.status(403).json({ error: 'Access denied' });
+
+    try {
+        if (!fs.existsSync(fromPath)) return res.status(404).json({ error: 'Source file not found' });
+        const dir = path.dirname(toPath);
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+        fs.renameSync(fromPath, toPath);
+        res.json({ success: true, from: fromPath, to: toPath });
+    } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ========== Agentic Tool-calling Loop ==========
+const FILE_TOOLS_PROMPT = `
+## File System Tools (Available when running locally):
+You have access to the user's local file system. You can use these tools by outputting special commands:
+
+To use a tool, output EXACTLY this format on its own line:
+[TOOL:tool_name:arg1|arg2]
+
+Available tools:
+- [TOOL:list_dir:path] — List files in a directory. Example: [TOOL:list_dir:C:\\Users\\lgopl\\Documents]
+- [TOOL:read_file:path] — Read a text file. Example: [TOOL:read_file:C:\\Users\\lgopl\\notes.txt]
+- [TOOL:search:query|path] — Search for files by name. Example: [TOOL:search:report|C:\\Users\\lgopl\\Documents]
+- [TOOL:create_file:path|content] — Create a new file. Example: [TOOL:create_file:C:\\Users\\lgopl\\Desktop\\todo.txt|Buy groceries]
+- [TOOL:move_file:from|to] — Move or rename a file. Example: [TOOL:move_file:C:\\old.txt|C:\\new.txt]
+
+RULES:
+1. NEVER delete files. There is no delete tool.
+2. Only use tools when the user specifically asks about files on their computer.
+3. After receiving tool results, summarize them clearly in natural language.
+4. Be careful with paths — always use absolute paths.
+5. The user's home directory is: ${USER_HOME}
+`;
+
+app.post('/api/tools/execute', async (req, res) => {
+    if (process.env.VERCEL) return res.status(403).json({ error: 'File tools only work locally' });
+    const { tool, args } = req.body;
+
+    try {
+        switch (tool) {
+            case 'list_dir': {
+                const items = fs.readdirSync(path.resolve(args[0] || USER_HOME), { withFileTypes: true }).slice(0, 80);
+                const result = items.map(i => `${i.isDirectory() ? '📁' : '📄'} ${i.name}`).join('\n');
+                return res.json({ result: `Files in ${args[0]}:\n${result}` });
+            }
+            case 'read_file': {
+                const target = path.resolve(args[0]);
+                if (!isPathSafe(target)) return res.json({ result: 'Error: Access denied' });
+                const stat = fs.statSync(target);
+                if (stat.size > 1024 * 1024) return res.json({ result: 'Error: File too large' });
+                const content = fs.readFileSync(target, 'utf-8').substring(0, 30000);
+                return res.json({ result: `Content of ${args[0]} (${stat.size} bytes):\n${content}` });
+            }
+            case 'search': {
+                const query = args[0];
+                const searchDir = path.resolve(args[1] || USER_HOME);
+                if (!isPathSafe(searchDir)) return res.json({ result: 'Error: Access denied' });
+                const results = [];
+                function walk(dir, level) {
+                    if (level > 3 || results.length >= 30) return;
+                    try {
+                        for (const item of fs.readdirSync(dir, { withFileTypes: true })) {
+                            if (results.length >= 30) break;
+                            if (item.name.startsWith('.') || item.name === 'node_modules') continue;
+                            const full = path.join(dir, item.name);
+                            if (item.name.toLowerCase().includes(query.toLowerCase())) results.push(full);
+                            if (item.isDirectory() && !BLOCKED_PATHS.some(bp => full.toLowerCase().includes(bp))) walk(full, level + 1);
+                        }
+                    } catch (e) { }
+                }
+                walk(searchDir, 0);
+                return res.json({ result: results.length > 0 ? `Found ${results.length} matches:\n${results.join('\n')}` : `No files matching "${query}" found in ${searchDir}` });
+            }
+            case 'create_file': {
+                const target = path.resolve(args[0]);
+                if (!isWriteSafe(target)) return res.json({ result: 'Error: Cannot create this file type' });
+                const dir = path.dirname(target);
+                if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+                fs.writeFileSync(target, args[1] || '', 'utf-8');
+                return res.json({ result: `✅ Created file: ${target}` });
+            }
+            case 'move_file': {
+                const fromP = path.resolve(args[0]), toP = path.resolve(args[1]);
+                if (!isPathSafe(fromP) || !isWriteSafe(toP)) return res.json({ result: 'Error: Access denied' });
+                fs.renameSync(fromP, toP);
+                return res.json({ result: `✅ Moved: ${fromP} → ${toP}` });
+            }
+            default: return res.json({ result: `Unknown tool: ${tool}` });
+        }
+    } catch (e) { res.json({ result: `Error: ${e.message}` }); }
 });
 
 // SPA fallback
@@ -374,15 +777,31 @@ app.use((req, res) => {
 // ========== Start (or Export for Vercel) ==========
 loadSchedules();
 
-if (process.env.NODE_ENV !== 'production' && !process.env.VERCEL) {
-    app.listen(PORT, () => {
-        console.log(`\n  🚀 Qwen Agent running at http://localhost:${PORT}`);
-        console.log(`  🧠 Model: Qwen 3.5-122B (Agent mode)`);
-        console.log(`  ⚡ Features: Streaming, Thinking, Scheduler, Auto-titles`);
+// ========== Start Logic ==========
+loadSchedules();
+
+if (IS_RENDER || (!process.env.VERCEL && process.env.NODE_ENV !== 'production')) {
+    app.listen(PORT, async () => {
+        console.log(`\n🚀 Server running on port ${PORT}`);
+        
+        if (IS_RENDER && RENDER_URL && bot) {
+            try {
+                const webhookUrl = `${RENDER_URL}/api/telegram-webhook`;
+                await bot.telegram.setWebhook(webhookUrl);
+                console.log(`✅ Render Webhook Auto-Set: ${webhookUrl}`);
+            } catch (e) {
+                console.log(`⚠️ Render Webhook Auto-Set Failed: ${e.message}`);
+            }
+        }
     });
 } else {
-    // On Vercel, setup cron jobs as memory fallback (though they will sleep)
     setupCronJobs();
+}
+
+// Polling mode for true local development (not Render/Vercel)
+if (bot && !process.env.VERCEL && !IS_RENDER) {
+    tgBotStatus = "Starting Polling (Local)";
+    bot.telegram.deleteWebhook().then(() => bot.launch());
 }
 
 module.exports = app;

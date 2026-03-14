@@ -9,7 +9,7 @@ const S = {
   artifacts: [], activeArt: null,
   schedules: [], // {id, time:"HH:MM", query:"...", active:true}
   schedTimers: {},
-  settings: { temp: 0.6, topP: 0.95, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent', model: 'qwen/qwen3.5-122b-a10b' },
+  settings: { temp: 0.7, topP: 0.9, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent', model: 'z-ai/glm5' },
   attachedFiles: [], // [{name, content}]
 };
 
@@ -112,8 +112,10 @@ function renderShell() {
         </div>
         <div class="ctrl"><div class="ctrl-row"><label>Model</label></div>
           <select id="sModel" class="ctrl-select">
+            <option value="z-ai/glm5">GLM 5 (Smart/Reasoning)</option>
             <option value="qwen/qwen3.5-122b-a10b">Qwen 3.5 122B</option>
-            <option value="z-ai/glm4.7">GLM 4.7</option>
+            <option value="qwen/qwen3-next-80b-a3b-thinking">Qwen 3 Thinking (80B)</option>
+            <option value="qwen/qwen3-next-80b-a3b-instruct">Qwen 3 Fast (80B)</option>
           </select>
           <p class="ctrl-hint">Choose the AI brain for your agent.</p>
         </div>
@@ -224,7 +226,7 @@ function updateThinkPill() { document.getElementById('thinkPill').classList.togg
 function updateWebPill() { document.getElementById('webPill').classList.toggle('on', !!S.settings.webSearch); }
 function updateSettingsUI() {
   const modeSel = document.getElementById('sMode'); if (modeSel) modeSel.value = S.settings.mode || 'agent';
-  const modelSel = document.getElementById('sModel'); if (modelSel) modelSel.value = S.settings.model || 'qwen/qwen3.5-122b-a10b';
+  const modelSel = document.getElementById('sModel'); if (modelSel) modelSel.value = S.settings.model || 'z-ai/glm5';
   document.getElementById('sTemp').value = S.settings.temp; document.getElementById('vTemp').textContent = S.settings.temp.toFixed(2);
   document.getElementById('sTopP').value = S.settings.topP; document.getElementById('vTopP').textContent = S.settings.topP.toFixed(2);
   document.getElementById('sMax').value = S.settings.maxTok; document.getElementById('vMax').textContent = S.settings.maxTok;
@@ -412,12 +414,22 @@ function fmtCode(t) {
   h = h.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
   h = h.replace(/(<li>.*<\/li>\n?)+/g, '<ul>$&</ul>');
   h = h.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>');
+  h = h.replace(/^\|(.+)\|$/gm, (line) => {
+    const cells = line.split('|').map(x => x.trim()).filter(x => x !== '');
+    if (cells.every(c => c.match(/^[:\s-]{3,}$/))) return '<!-- sep -->';
+    return `<tr>${cells.map(c => `<td>${c}</td>`).join('')}</tr>`;
+  });
+  h = h.replace(/(?:<tr>.*<\/tr>\n?|<!-- sep -->\n?)+/g, m => {
+    const rows = m.replace(/<!-- sep -->\n?/g, '');
+    return rows ? `<table>${rows}</table>` : '';
+  });
+
   h = h.replace(/\n\n/g, '</p><p>');
   h = h.replace(/\n/g, '<br>');
   h = '<p>' + h + '</p>';
   h = h.replace(/<p><\/p>/g, '');
-  h = h.replace(/<p>(<(?:h[1-3]|div|ul|blockquote))/g, '$1');
-  h = h.replace(/(<\/(?:h[1-3]|div|ul|blockquote)>)<\/p>/g, '$1');
+  h = h.replace(/<p>(<(?:h[1-3]|div|ul|blockquote|table))/g, '$1');
+  h = h.replace(/(<\/(?:h[1-3]|div|ul|blockquote|table)>)<\/p>/g, '$1');
   return h;
 }
 
@@ -533,8 +545,12 @@ async function genTitle(chatId, msg) {
 
 // ===== Send & Stream =====
 async function handleSend() {
+  if (S.streaming) return;
   let txt = document.getElementById('input').value.trim();
-  if (!txt && !S.attachedFiles.length || S.streaming) return;
+  if (!txt && !S.attachedFiles.length) return;
+  
+  S.streaming = true;
+  updateSendBtn();
 
   if (S.attachedFiles.length) {
     const fileCtx = S.attachedFiles.map(f => `FILE: ${f.name}\n---\n${f.content}\n---`).join('\n\n');
@@ -562,7 +578,8 @@ async function handleSend() {
 }
 
 async function streamResp(chat) {
-  S.streaming = true; S.ctrl = new AbortController(); updateSendBtn();
+  S.ctrl = new AbortController();
+  updateSendBtn();
 
   // Create streaming msg
   const el = document.createElement('div');
@@ -647,6 +664,42 @@ async function streamResp(chat) {
   const sm = document.getElementById('smsg'); if (sm) sm.remove();
 
   if (full) {
+    // Check for tool calls in the response
+    const toolCalls = extractToolCalls(full);
+
+    if (toolCalls.length > 0) {
+      // Show partial response (without tool markers)
+      const cleanResponse = full.replace(/\[TOOL:\w+:[^\]]*\]/g, '').trim();
+      if (cleanResponse) {
+        chat.messages.push({ role: 'assistant', content: cleanResponse, thinking: fullT || null });
+        document.getElementById('msgs').appendChild(makeMsgEl('assistant', cleanResponse, fullT || null, false));
+      }
+
+      // Execute tools
+      const toolResults = [];
+      for (const tc of toolCalls) {
+        try {
+          const r = await fetch('/api/tools/execute', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ tool: tc.tool, args: tc.args })
+          });
+          const d = await r.json();
+          toolResults.push(`[Tool: ${tc.tool}] ${d.result || d.error || 'No result'}`);
+        } catch (e) {
+          toolResults.push(`[Tool: ${tc.tool}] Error: ${e.message}`);
+        }
+      }
+
+      // Feed results back to AI for a summary
+      const toolCtx = toolResults.join('\n\n');
+      chat.messages.push({ role: 'user', content: `[TOOL RESULTS]:\n${toolCtx}\n\nPlease summarize these results for me in a clear, natural way.` });
+
+      // Stream the follow-up response
+      await streamResp(chat);
+      return;
+    }
+
     chat.messages.push({ role: 'assistant', content: full, thinking: fullT || null });
     document.getElementById('msgs').appendChild(makeMsgEl('assistant', full, fullT || null, false));
     // Auto-open artifact for big code blocks
@@ -659,10 +712,31 @@ async function streamResp(chat) {
   document.getElementById('input').focus();
 }
 
+// ===== Tool Extraction =====
+function extractToolCalls(text) {
+  const re = /\[TOOL:(\w+):([^\]]*)\]/g;
+  const calls = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    const tool = m[1];
+    const args = m[2].split('|');
+    calls.push({ tool, args });
+  }
+  return calls;
+}
+
 function stopStream() { if (S.ctrl) S.ctrl.abort(); }
 
 // ===== Boot =====
 document.addEventListener('DOMContentLoaded', () => {
   load();
   renderShell();
+  
+  // Mobile dynamic height fix
+  const vh = () => {
+    let vh = window.innerHeight * 0.01;
+    document.documentElement.style.setProperty('--vh', `${vh}px`);
+  };
+  window.addEventListener('resize', vh);
+  vh();
 });
