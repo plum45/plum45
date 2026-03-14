@@ -283,15 +283,20 @@ if (bot) {
 
     bot.command('status', async (ctx) => {
         const userId = ctx.from.id;
-        const userDoc = await db.collection('userActivities').doc(String(userId)).get();
-        const hasWebhook = userDoc.exists && userDoc.data().webhookUrl;
+        let hasWebhook = false;
+        try {
+            const userDoc = await db.collection('userActivities').doc(String(userId)).get();
+            hasWebhook = userDoc.exists && userDoc.data().webhookUrl;
+        } catch (e) {
+            console.error('Status DB Error:', e.message);
+        }
         
         const statusText = `📡 **สถานะระบบ Stacy**
-254: - 🟢 Engine: Moonshot Kimi K2 (Active)
-255: - 🟢 Backend: Render Cloud
-256: - Database Path: ${firebaseStatus}
-257: - ${hasWebhook ? '🟢 Webhook: Connected (Calendar Ready)' : '🔴 Webhook: Not Set (Calendar Disabled)'}
-258: - 🕒 Timezone: Asia/Bangkok`;
+- 🟢 Engine: Moonshot Kimi K2 (Active)
+- 🟢 Backend: Render Cloud
+- Database Path: ${firebaseStatus}
+- ${hasWebhook ? '🟢 Webhook: Connected (Calendar Ready)' : '🔴 Webhook: Not Set (Calendar Disabled)'}
+- 🕒 Timezone: Asia/Bangkok`;
         ctx.reply(statusText);
     });
     
