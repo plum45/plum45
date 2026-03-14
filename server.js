@@ -94,48 +94,46 @@ if (bot) {
     bot.on('text', async (ctx) => {
         const userId = ctx.from.id;
         const userMsg = ctx.message.text;
-
-        if (userMsg.toLowerCase() === 'test') return ctx.reply('✅ บอทได้รับข้อความแล้ว!');
+        if (userMsg.toLowerCase() === 'test') return ctx.reply('✅ Infrastructure Link: OK');
 
         await ctx.sendChatAction('typing');
         
         try {
-            if (!tgContexts.has(userId)) tgContexts.set(userId, []);
-            const recentHistory = tgContexts.get(userId).slice(-8); 
+            // --- PILLAR 1 & 3: PERCEPTION & STATE ---
+            if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], state: 'idle' });
+            const userStore = tgContexts.get(userId);
             
-            // 1. Recall Long-term Memory & Fetch Search
+            // --- PILLAR 2: MEMORY ARCHITECTURE (Long-term Recall) ---
             const [personalFacts, searchData] = await Promise.all([
                 getBotMemory(userId),
                 (async () => {
                     const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
                     const isNews = /ข่าว|ล่าสุด|news|update/i.test(userMsg);
-                    if (isWeather || isNews || userMsg.length > 15) return await performSearch(userMsg);
+                    if (isWeather || isNews || userMsg.length > 20) return await performSearch(userMsg);
                     return "";
                 })()
             ]);
 
-            // Build Prompt with Memory + Internet Knowledge
+            // --- PILLAR 2: REASONING & PLANNING (Chain-of-Thought) ---
             const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
             const promptMessages = [
-                { role: 'system', content: `You are an Evolving AI Assistant. 
-                Current Time: ${now}.
+                { role: 'system', content: `[CORE ROLE]: You are a Reasoning AI Agent (Architecture Pillar 2).
+                [CURRENT CONTEXT]: Time is ${now}. 
+                [STATE]: ${userStore.state}
                 
-                ## Your Long-term Memory about this User:
-                ${personalFacts.length > 0 ? personalFacts.join('\n') : "No memories yet. Learn from the user!"}
-                
-                ## Real-time Internet Learning:
-                ${searchData || "No new internet data. Use your existing knowledge or ask if unsure."}
+                [MEMORY]: User facts: ${personalFacts.join(' | ')}
+                [INPUT/SEARCH]: ${searchData || "No new data."}
 
-                INSTRUCTIONS:
-                1. Use the memory to personalize the answer.
-                2. Use the internet data to provide current, accurate info.
-                3. Always learn from the user's corrections or statements.
-                4. Answer briefly but helpfully in Thai.` },
-                ...recentHistory,
+                [REASONING GUIDELINES]:
+                1. Task Decomposition: Understand the goal. If complex, explain steps briefly.
+                2. Self-Correction: Ensure facts match the current date/context.
+                3. Connectivity: Always link back to the conversation history below.
+                4. Human-Centric: Be polite, concise, and helpful in Thai.` },
+                ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
 
-            // 2. PRIMARY: Qwen 2.5 7B (Turbo Engine)
+            // --- PILLAR 1: PROCESSING ENGINE (Probabilistic Logic via Qwen Turbo) ---
             const response = await axios.post(NVIDIA_API_URL, {
                 model: 'qwen/qwen2.5-7b-instruct',
                 messages: promptMessages,
@@ -147,25 +145,29 @@ if (bot) {
             });
 
             const reply = response.data.choices[0].message.content;
-            if (!reply) throw new Error("Empty AI response");
+            if (!reply) throw new Error("Processing logic failed to yield output.");
 
-            // 3. Update Conversation & Persistent Memory
-            tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
-            if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
+            // --- PILLAR 4 & 5: SYSTEM SAFEGUARDS & STATE UPDATE ---
+            userStore.history.push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
+            if (userStore.history.length > 20) userStore.history.splice(0, 2);
             
-            // Background Learning
+            // Operational Feedback Loop: Learn from this interaction
             saveBotMemory(userId, userMsg, reply);
 
+            // Output Delivery
             if (reply.length > 4000) {
                 const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
                 for (const chunk of chunks) await ctx.reply(chunk);
             } else {
                 await ctx.reply(reply);
             }
+            console.log(`📡 [PILLAR 5] Scalable Session Processed for User: ${userId}`);
+
         } catch (e) {
-            console.error('❌ BOT ERROR:', e.message);
-            await ctx.reply('⚠️ ระบบประมวลผลนานเกินไป หรือ API เกิดปัญหาชั่วคราว รบกวนลองใหม่อีกครั้งครับ');
+            console.error('❌ [PILLAR 4] Guardrail Error:', e.message);
+            await ctx.reply('⚠️ ระบบ Thinking Loop เกิดข้อผิดพลาดชั่วคราว รบกวนลองใหม่อีกครั้งครับ');
         }
+    });
     });
 }
 
