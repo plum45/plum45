@@ -15,6 +15,7 @@ let tgBotError = null;
 const IS_RENDER = !!process.env.RENDER;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.onrender.com
 
+const adminConfig = { projectId: "ai--agent-12d7a" };
 try {
     const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
     if (fs.existsSync(serviceAccountPath)) {
