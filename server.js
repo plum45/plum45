@@ -68,26 +68,33 @@ if (bot) {
         await ctx.sendChatAction('typing');
         
         try {
-            // 1. Fetch Real-time Context (Weather/News/Web)
+            if (!tgContexts.has(userId)) tgContexts.set(userId, []);
+            const recentHistory = tgContexts.get(userId).slice(-8); // Increased to 8 for better "linking"
+            
+            // 1. Smart Search Triggering
             let searchContext = "";
             const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
-            if (isWeather || userMsg.length > 10) {
+            const isNews = /ข่าว|ล่าสุด|news|update/i.test(userMsg);
+            
+            // Only search if it's weather/news OR a long specific question (>15 chars)
+            // This prevents short follow-up questions from grabbing wrong context.
+            if (isWeather || isNews || (userMsg.length > 15 && !recentHistory.length)) {
                 searchContext = await performSearch(userMsg);
             }
 
-            if (!tgContexts.has(userId)) tgContexts.set(userId, []);
-            const recentHistory = tgContexts.get(userId).slice(-4);
-            
-            // Build Prompt with Time & Search Context
+            // Build Prompt with Strict Instruction to follow history
             const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
             const promptMessages = [
-                { role: 'system', content: `You are a helpful assistant. Use Thailand time: ${now}. Answer briefly in Thai.\n${searchContext}` },
+                { role: 'system', content: `You are a helpful assistant. Current Thailand time: ${now}. 
+                CRITICAL: Maintain conversation continuity. Prioritize the conversation history below over any external search data.
+                If the user asks a follow-up question (e.g., "how many steps"), refer to the previous topic discussed in history.
+                
+                ${searchContext ? `[Optional External Info]:\n${searchContext}` : ""}` },
                 ...recentHistory,
                 { role: 'user', content: userMsg }
             ];
 
-            // 2. PRIMARY: Qwen 2.5 7B (Turbo Engine for Render Reliability)
-            // Even though user liked GLM, Qwen is the only one that is consistently "Instant" on NVIDIA right now.
+            // 2. PRIMARY: Qwen 2.5 7B (Turbo Engine)
             const response = await axios.post(NVIDIA_API_URL, {
                 model: 'qwen/qwen2.5-7b-instruct',
                 messages: promptMessages,
