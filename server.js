@@ -12,6 +12,7 @@ const { Telegraf } = require('telegraf');
 // ========== Global Bot Status ==========
 let tgBotStatus = "Initializing";
 let tgBotError = null;
+const activeUsers = new Set(); // For proactive messaging logic
 const IS_RENDER = !!process.env.RENDER;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.onrender.com
 
@@ -153,7 +154,23 @@ if (bot) {
         { command: 'clear', description: 'ล้างประวัติการคุยปัจจุบัน' }
     ]);
 
-    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ Stacy AI Agent (Pillar Architect Mode) ยินดีที่ได้ช่วยจัดการเรื่องงานครับ\n\nพิมพ์ /help เพื่อดูวิธีใช้งานทั้งหมดครับ'));
+    bot.start(async (ctx) => {
+        const userId = ctx.from.id;
+        activeUsers.add(userId);
+        await db.collection('userActivities').doc(String(userId)).set({ lastActive: new Date() }, { merge: true });
+        ctx.reply('สวัสดีครับ! ผมคือ Stacy AI Agent (Pillar Architect Mode) ยินดีที่ได้ช่วยจัดการเรื่องงานครับ\n\nพิมพ์ /help เพื่อดูวิธีใช้งานทั้งหมดครับ');
+    });
+
+    bot.command('notify', (ctx) => {
+        const userId = ctx.from.id;
+        if (activeUsers.has(userId)) {
+            activeUsers.delete(userId);
+            ctx.reply('🔕 ปิดการแจ้งเตือนงานตอนเช้าแล้วครับ');
+        } else {
+            activeUsers.add(userId);
+            ctx.reply('🔔 เปิดการแจ้งเตือน "สรุปงานตอนเช้า (8:00)" เรียบร้อยครับ!');
+        }
+    });
     
     bot.help((ctx) => {
         const helpText = `🛠️ **คู่มือการใช้งาน Stacy AI Agent**
@@ -347,6 +364,30 @@ if (bot) {
         }
     });
 }
+
+// ========== Proactive Agent Intelligence (Pillar 1: Schedule Logic) ==========
+cron.schedule('0 8 * * *', async () => {
+    console.log('📢 Running Morning Brief Logic...');
+    for (const userId of activeUsers) {
+        try {
+            const snapshot = await db.collection('userActivities').doc(String(userId)).collection('tasks')
+                .where('status', '==', 'pending')
+                .limit(5).get();
+            
+            if (!snapshot.empty) {
+                let brief = `☀️ **อรุณสวัสดิ์ครับ! วันนี้มีงานค้างอยู่ดังนี้ครับ:**\n\n`;
+                snapshot.forEach(doc => {
+                    const task = doc.data();
+                    brief += `📍 ${task.title} (${task.time || 'วันนี้'})\n`;
+                });
+                brief += `\nต้องการให้ช่วยเหลืออะไร พิมพ์บอก Stacy ได้เลยครับ!`;
+                await bot.telegram.sendMessage(userId, brief, { parse_mode: 'Markdown' });
+            }
+        } catch (err) {
+            console.error(`Proactive Error for ${userId}:`, err.message);
+        }
+    }
+}, { timezone: "Asia/Bangkok" });
 
 // ========== Config (use ENV for security) ==========
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
