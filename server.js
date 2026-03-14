@@ -15,23 +15,19 @@ let tgBotError = null;
 const IS_RENDER = !!process.env.RENDER;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.onrender.com
 
-// Initialize Firebase Admin
-let adminConfig = { projectId: "ai--agent-12d7a" };
-
 try {
     const serviceAccountPath = path.join(__dirname, 'serviceAccountKey.json');
     if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
-        console.log("Firebase Admin: Initialized with local serviceAccountKey.json");
+        if (admin.apps.length === 0) admin.initializeApp(adminConfig);
+        console.log("✅ Firebase Admin: Cloud Sync Enabled");
     } else {
-        console.log("Firebase Admin: Initialized with default credentials (needs GOOGLE_APPLICATION_CREDENTIALS locally)");
+        if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
+        console.log("ℹ️ Firebase Admin: Local Mode (No Credentials)");
     }
 } catch (e) {
-    console.error("Firebase Admin Config Error:", e.message);
-}
-
-if (admin.apps.length === 0) {
-    admin.initializeApp(adminConfig);
+    if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
+    console.log("ℹ️ Firebase Admin: Minimal Mode");
 }
 const db = admin.firestore();
 
@@ -72,41 +68,61 @@ if (bot) {
         
         try {
             if (!tgContexts.has(userId)) tgContexts.set(userId, []);
-            const recentHistory = tgContexts.get(userId).slice(-6);
-            
-            const response = await axios.post(NVIDIA_API_URL, {
-                model: 'z-ai/glm4.7',
-                messages: [
-                    { role: 'system', content: "You are a helpful assistant. Answer briefly in Thai." },
-                    ...recentHistory,
-                    { role: 'user', content: userMsg }
-                ],
-                temperature: 0.7,
-                max_tokens: 1024
-            }, {
-                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-                timeout: 30000 // Increased to 30s for Render stability
-            });
+            const recentHistory = tgContexts.get(userId).slice(-4); // Keep it lean for speed
+            const promptMessages = [
+                { role: 'system', content: "You are a helpful assistant. Answer briefly in Thai." },
+                ...recentHistory,
+                { role: 'user', content: userMsg }
+            ];
 
-            const reply = response.data.choices[0].message.content;
-            if (!reply) throw new Error("AI returned an empty response.");
+            let reply = "";
+            let usedModel = "z-ai/glm4.7";
 
+            try {
+                // Stage 1: Attempt Preferred GLM model (14s timeout)
+                const res = await axios.post(NVIDIA_API_URL, {
+                    model: 'z-ai/glm4.7',
+                    messages: promptMessages,
+                    temperature: 0.7,
+                    max_tokens: 800
+                }, {
+                    headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+                    timeout: 14000 
+                });
+                reply = res.data.choices[0].message.content;
+            } catch (err) {
+                console.warn(`⚠️ GLM Timeout/Error, falling back to Qwen...`);
+                // Stage 2: Emergency Fallback to Ultra-Fast Qwen
+                usedModel = "qwen/qwen2.5-7b-instruct";
+                const fallbackRes = await axios.post(NVIDIA_API_URL, {
+                    model: 'qwen/qwen2.5-7b-instruct',
+                    messages: promptMessages,
+                    temperature: 0.6,
+                    max_tokens: 800
+                }, {
+                    headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+                    timeout: 12000
+                });
+                reply = fallbackRes.data.choices[0].message.content;
+            }
+
+            if (!reply) throw new Error("No response from AI candidates.");
+
+            // Success: Update context & Reply
             tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
-            if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
+            if (tgContexts.get(userId).length > 10) tgContexts.get(userId).splice(0, 2);
 
-            // Split message if too long for Telegram (4096 chars)
             if (reply.length > 4000) {
                 const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
-                for (const chunk of chunks) {
-                    await ctx.reply(chunk);
-                }
+                for (const chunk of chunks) await ctx.reply(chunk);
             } else {
                 await ctx.reply(reply);
             }
+            console.log(`✅ [TG] Success using ${usedModel}`);
+
         } catch (e) {
-            console.error('❌ AI ERROR DETAIL:', e.response?.data || e.message);
-            const errorType = e.code === 'ECONNABORTED' ? 'ใช้เวลาคิดนานเกินไป (30s)' : (e.response?.status === 401 ? 'API Key ไม่ถูกต้อง' : 'เกิดข้อผิดพลาดทางเทคนิค');
-            await ctx.reply(`⚠️ ขออภัยครับ: ${errorType}\n(รายละเอียด: ${e.message.substring(0, 50)}...)`);
+            console.error('❌ CRITICAL BOT ERROR:', e.message);
+            await ctx.reply('⚠️ ขออภัยครับ ระบบหนาแน่นมาก รบกวนลองใหม่อีกครั้งใน 10 วินาทีครับ');
         }
     });
 }
