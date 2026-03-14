@@ -24,23 +24,38 @@ try {
     const directPrivateKey = process.env.FIREBASE_PRIVATE_KEY;
 
     if (directPrivateKey) {
-        // Most reliable way: manually construct the creds from known values
+        // Clean and format private key
+        let cleanKey = directPrivateKey.trim();
+        if (cleanKey.startsWith('"') && cleanKey.endsWith('"')) cleanKey = cleanKey.slice(1, -1);
+        cleanKey = cleanKey.replace(/\\n/g, '\n');
+        
+        // Ensure standard PEM format
+        if (!cleanKey.includes('-----BEGIN PRIVATE KEY-----')) {
+            cleanKey = `-----BEGIN PRIVATE KEY-----\n${cleanKey}\n-----END PRIVATE KEY-----`;
+        }
+
         adminConfig.credential = admin.credential.cert({
             projectId: "ai--agent-12d7a",
             clientEmail: "firebase-adminsdk-fbsvc@ai--agent-12d7a.iam.gserviceaccount.com",
-            privateKey: directPrivateKey.replace(/\\n/g, '\n')
+            privateKey: cleanKey
         });
+        
         if (admin.apps.length === 0) admin.initializeApp(adminConfig);
         firebaseStatus = "🟢 Private Key Active";
         console.log("✅ Firebase Admin: Cloud Sync Enabled via Direct Key");
     } else if (serviceAccountEnv) {
         let parsedCreds;
         try {
-            let cleanEnv = serviceAccountEnv.trim().replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
-            if ((cleanEnv.startsWith('"') && cleanEnv.endsWith('"')) || (cleanEnv.startsWith("'") && cleanEnv.endsWith("'"))) {
-                cleanEnv = cleanEnv.substring(1, cleanEnv.length - 1);
-            }
+            let cleanEnv = serviceAccountEnv.trim();
+            if (cleanEnv.startsWith('"') && cleanEnv.endsWith('"')) cleanEnv = cleanEnv.slice(1, -1);
+            
             parsedCreds = JSON.parse(cleanEnv.replace(/\\n/g, '\n'));
+            
+            // Fix nested private_key if it exists
+            if (parsedCreds.private_key) {
+                parsedCreds.private_key = parsedCreds.private_key.replace(/\\n/g, '\n');
+            }
+
             adminConfig.credential = admin.credential.cert(parsedCreds);
             if (admin.apps.length === 0) admin.initializeApp(adminConfig);
             firebaseStatus = "🟢 Service Account Active";
