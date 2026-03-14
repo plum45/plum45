@@ -168,7 +168,6 @@ if (bot) {
             await ctx.reply('⚠️ ระบบ Thinking Loop เกิดข้อผิดพลาดชั่วคราว รบกวนลองใหม่อีกครั้งครับ');
         }
     });
-    });
 }
 
 // ========== Config (use ENV for security) ==========
