@@ -76,8 +76,58 @@ async function saveBotMemory(userId, userMsg, botReply) {
     } catch (e) { console.error('Memory Save Error:', e.message); }
 }
 
+// ========== Action Integration Layer (Pillar 3) ==========
+async function handleAgentActions(userId, replyText, ctx) {
+    // Detect actions like [ACTION: SAVE_TASK { title: "..." }]
+    const actionMatch = replyText.match(/\[ACTION:\s*(\w+)\s*(\{.*?\})\]/);
+    if (!actionMatch) return;
+
+    const [_, actionType, actionDataStr] = actionMatch;
+    try {
+        const data = JSON.parse(actionDataStr);
+        const userRef = db.collection('userActivities').doc(String(userId));
+        
+        switch (actionType) {
+            case 'SAVE_TASK':
+                await userRef.collection('tasks').add({
+                    ...data,
+                    status: 'pending',
+                    createdAt: new Date()
+                });
+                await ctx.reply(`✅ ระบบบันทึกงานลงในตารางแล้ว: "${data.title || 'ไม่มีชื่อ'}"`);
+                break;
+            case 'WORK_LOG':
+                await userRef.collection('logs').add({
+                    content: data.note,
+                    type: data.type || 'general',
+                    timestamp: new Date()
+                });
+                await ctx.reply(`📝 บันทึกเวลางานเรียบร้อย: "${data.note}"`);
+                break;
+            case 'CONNECT_WEBHOOK':
+                // Infrastructure for external apps (Make/Zapier)
+                await userRef.set({ webhookUrl: data.url }, { merge: true });
+                await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
+                break;
+        }
+    } catch (e) { console.error('Action Logic Error:', e.message); }
+}
+
 if (bot) {
-    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ GLM AI Agent ยินดีที่ได้รู้จักครับ (Super Stable Mode)'));
+    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ Stacy AI Agent (Pillar Architect Mode) ยินดีที่ได้ช่วยจัดการเรื่องงานครับ'));
+    
+    // View Schedule Command
+    bot.command('schedule', async (ctx) => {
+        const userId = ctx.from.id;
+        const snapshot = await db.collection('userActivities').doc(String(userId)).collection('tasks').limit(10).get();
+        if (snapshot.empty) return ctx.reply('📭 คุณยังไม่มีงานในตารางครับ');
+        let text = "📅 **ตารางงานของคุณ:**\n";
+        snapshot.forEach(doc => {
+            const task = doc.data();
+            text += `- [ ] ${task.title} (${task.time || 'ไม่ระบุเวลา'})\n`;
+        });
+        ctx.reply(text);
+    });
     
     // Webhook Route
     app.post('/api/telegram-webhook', async (req, res) => {
@@ -124,13 +174,18 @@ if (bot) {
                 [MEMORY]: User facts: ${personalFacts.join(' | ')}
                 [INPUT/SEARCH]: ${searchData || "No new data."}
 
+                [ACTION CAPABILITIES]:
+                You can trigger actions by adding this text at the END of your reply:
+                1. To save a task: [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
+                2. To log hours/notes: [ACTION: WORK_LOG {"note": "...", "type": "..."}]
+                3. To sync with web apps: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
+
                 [REASONING GUIDELINES]:
-                1. Task Decomposition: Understand the goal.
+                1. Task Decomposition: Understand the goal. 
                 2. Self-Correction: Ensure facts match the current date.
                 3. Connectivity: Maintain context with previous chats.
-                4. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย). 
-                5. ABSOLUTE FORBIDDEN: DO NOT use Chinese characters (中文), even for technical terms.
-                6. PERSONALITY: Use "ครับ" for politeness.` },
+                4. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
+                5. INTEGRATION: If user wants to "schedule" or "log", emit the [ACTION] tag.` },
                 ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
@@ -154,15 +209,19 @@ if (bot) {
             userStore.history.push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
             if (userStore.history.length > 20) userStore.history.splice(0, 2);
             
-            // Operational Feedback Loop: Learn from this interaction
+            // Background Learning & Action Execution
             saveBotMemory(userId, userMsg, reply);
+            handleAgentActions(userId, reply, ctx);
 
-            // Output Delivery
-            if (reply.length > 4000) {
-                const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
-                for (const chunk of chunks) await ctx.reply(chunk);
-            } else {
-                await ctx.reply(reply);
+            // Output Delivery (Clean UI: Hide raw action tags from user if needed, but here we keep for transparency)
+            const cleanReply = reply.replace(/\[ACTION:.*?\]/g, '').trim();
+            if (cleanReply.length > 0) {
+                if (cleanReply.length > 4000) {
+                    const chunks = cleanReply.match(/[\s\S]{1,4000}/g) || [];
+                    for (const chunk of chunks) await ctx.reply(chunk);
+                } else {
+                    await ctx.reply(cleanReply);
+                }
             }
             console.log(`📡 [PILLAR 5] Scalable Session Processed for User: ${userId}`);
 
