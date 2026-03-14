@@ -116,15 +116,22 @@ async function handleAgentActions(userId, replyText, ctx) {
                 
                 if (webhookUrl) {
                     try {
-                        await axios.post(webhookUrl, {
+                        console.log(`🔗 [ACTION] Dispatching to Webhook: ${webhookUrl} for User: ${userId}`);
+                        const response = await axios.post(webhookUrl, {
                             action: 'ADD_CALENDAR',
                             title: data.title,
                             start: data.startTime || data.time,
-                            description: data.description || `Added by Stacy AI`
-                        });
-                        await ctx.reply(`📅 ส่งข้อมูลไปที่ Google Calendar เรียบร้อยแล้วครับ!`);
+                            description: data.description || `Added by Stacy AI via Telegram`
+                        }, { timeout: 10000 });
+                        
+                        if (response.status === 200 || response.status === 201) {
+                            await ctx.reply(`📅 ส่งข้อมูลไปที่ Google Calendar เรียบร้อยแล้วครับ!`);
+                        } else {
+                            throw new Error(`HTTP Status ${response.status}`);
+                        }
                     } catch (err) {
-                        await ctx.reply(`⚠️ เชื่อมต่อ Google Calendar ไม่สำเร็จ (Webhook Error)`);
+                        console.error('Webhook Error:', err.message);
+                        await ctx.reply(`⚠️ พบปัญหาในการส่งข้อมูลไปที่ Google Calendar: ${err.message}\n(ตรวจสอบว่าคุณกด Deploy เป็น "Anyone" และใช้ URL ล่าสุดหรือยังครับ)`);
                     }
                 } else {
                     await ctx.reply(`❌ ยังไม่ได้ตั้งค่า Webhook สำหรับ Google Calendar ครับ กรุณาใช้คำสั่ง "เชื่อมต่อ Webhook ไปที่ [URL]" ก่อนครับ`);
@@ -271,7 +278,7 @@ if (bot) {
             ]);
 
             // --- PILLAR 2: REASONING & PLANNING (Chain-of-Thought) ---
-            const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+            const now = new Date().toLocaleString('en-US', { timeZone: 'Asia/Bangkok' });
             const promptMessages = [
                 { role: 'system', content: `[CORE ROLE]: You are a Reasoning AI Agent (Architecture Pillar 2).
                 [CURRENT CONTEXT]: Time is ${now}. 
@@ -284,8 +291,10 @@ if (bot) {
                 You can trigger actions by adding this text at the END of your reply:
                 1. To save a task (in Stacy's list): [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
                 2. To log hours/notes: [ACTION: WORK_LOG {"note": "...", "type": "..."}]
-                3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}]
+                3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "YYYY-MM-DDTHH:mm:ss", "description": "..."}]
                 4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
+
+                [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
                 [REASONING GUIDELINES]:
                 1. Task Decomposition: Understand the goal. 
