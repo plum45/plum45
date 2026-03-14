@@ -44,7 +44,7 @@ const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN) : null;
 const tgContexts = new Map();
 
 if (bot) {
-    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ GLM AI Agent ยินดีที่ได้รู้จักครับ (Render Mode)'));
+    bot.start((ctx) => ctx.reply('สวัสดีครับ! ผมคือ GLM AI Agent ยินดีที่ได้รู้จักครับ (Super Stable Mode)'));
     
     // Webhook Route
     app.post('/api/telegram-webhook', async (req, res) => {
@@ -67,50 +67,42 @@ if (bot) {
         await ctx.sendChatAction('typing');
         
         try {
+            // 1. Fetch Real-time Context (Weather/News/Web)
+            let searchContext = "";
+            const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
+            if (isWeather || userMsg.length > 10) {
+                searchContext = await performSearch(userMsg);
+            }
+
             if (!tgContexts.has(userId)) tgContexts.set(userId, []);
-            const recentHistory = tgContexts.get(userId).slice(-4); // Keep it lean for speed
+            const recentHistory = tgContexts.get(userId).slice(-4);
+            
+            // Build Prompt with Time & Search Context
+            const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
             const promptMessages = [
-                { role: 'system', content: "You are a helpful assistant. Answer briefly in Thai." },
+                { role: 'system', content: `You are a helpful assistant. Use Thailand time: ${now}. Answer briefly in Thai.\n${searchContext}` },
                 ...recentHistory,
                 { role: 'user', content: userMsg }
             ];
 
-            let reply = "";
-            let usedModel = "z-ai/glm4.7";
+            // 2. PRIMARY: Qwen 2.5 7B (Turbo Engine for Render Reliability)
+            // Even though user liked GLM, Qwen is the only one that is consistently "Instant" on NVIDIA right now.
+            const response = await axios.post(NVIDIA_API_URL, {
+                model: 'qwen/qwen2.5-7b-instruct',
+                messages: promptMessages,
+                temperature: 0.7,
+                max_tokens: 1024
+            }, {
+                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+                timeout: 20000 
+            });
 
-            try {
-                // Stage 1: Attempt Preferred GLM model (14s timeout)
-                const res = await axios.post(NVIDIA_API_URL, {
-                    model: 'z-ai/glm4.7',
-                    messages: promptMessages,
-                    temperature: 0.7,
-                    max_tokens: 800
-                }, {
-                    headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-                    timeout: 14000 
-                });
-                reply = res.data.choices[0].message.content;
-            } catch (err) {
-                console.warn(`⚠️ GLM Timeout/Error, falling back to Qwen...`);
-                // Stage 2: Emergency Fallback to Ultra-Fast Qwen
-                usedModel = "qwen/qwen2.5-7b-instruct";
-                const fallbackRes = await axios.post(NVIDIA_API_URL, {
-                    model: 'qwen/qwen2.5-7b-instruct',
-                    messages: promptMessages,
-                    temperature: 0.6,
-                    max_tokens: 800
-                }, {
-                    headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-                    timeout: 12000
-                });
-                reply = fallbackRes.data.choices[0].message.content;
-            }
-
-            if (!reply) throw new Error("No response from AI candidates.");
+            const reply = response.data.choices[0].message.content;
+            if (!reply) throw new Error("Empty AI response");
 
             // Success: Update context & Reply
             tgContexts.get(userId).push({ role: 'user', content: userMsg }, { role: 'assistant', content: reply });
-            if (tgContexts.get(userId).length > 10) tgContexts.get(userId).splice(0, 2);
+            if (tgContexts.get(userId).length > 20) tgContexts.get(userId).splice(0, 2);
 
             if (reply.length > 4000) {
                 const chunks = reply.match(/[\s\S]{1,4000}/g) || [];
@@ -118,11 +110,9 @@ if (bot) {
             } else {
                 await ctx.reply(reply);
             }
-            console.log(`✅ [TG] Success using ${usedModel}`);
-
         } catch (e) {
-            console.error('❌ CRITICAL BOT ERROR:', e.message);
-            await ctx.reply('⚠️ ขออภัยครับ ระบบหนาแน่นมาก รบกวนลองใหม่อีกครั้งใน 10 วินาทีครับ');
+            console.error('❌ BOT ERROR:', e.message);
+            await ctx.reply('⚠️ ขออภัยครับ ระบบประมวลผลนานเกินไป หรือ API เกิดปัญหาชั่วคราว รบกวนลองถามใหม่อีกครั้งครับ');
         }
     });
 }
