@@ -12,6 +12,7 @@ const { Telegraf } = require('telegraf');
 // ========== Global Bot Status ==========
 let tgBotStatus = "Initializing";
 let tgBotError = null;
+let firebaseStatus = "🔴 Disconnected"; // Diagnostic flag for Firebase
 const activeUsers = new Set(); // For proactive messaging logic
 const IS_RENDER = !!process.env.RENDER;
 const RENDER_URL = process.env.RENDER_EXTERNAL_URL; // e.g., https://qwen-chat.onrender.com
@@ -24,25 +25,31 @@ try {
     if (serviceAccountEnv) {
         let parsedCreds;
         try {
-            // Support both direct JSON and escaped string formats
-            parsedCreds = JSON.parse(serviceAccountEnv.replace(/\\n/g, '\n'));
+            // Clean up potentially quoted strings from Render/ENV
+            const cleanEnv = serviceAccountEnv.trim().replace(/^['"]|['"]$/g, '');
+            parsedCreds = JSON.parse(cleanEnv.replace(/\\n/g, '\n'));
             adminConfig.credential = admin.credential.cert(parsedCreds);
             if (admin.apps.length === 0) admin.initializeApp(adminConfig);
-            console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV (Resilient Mode)");
+            firebaseStatus = "🟢 Service Account Active";
+            console.log("✅ Firebase Admin: Cloud Sync Enabled via ENV");
         } catch (jsonErr) {
             console.error("❌ Firebase ENV Parse Error:", jsonErr.message);
             if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
+            firebaseStatus = "⚠️ Auth Error (Check Key Rules)";
         }
     } else if (fs.existsSync(serviceAccountPath)) {
         adminConfig.credential = admin.credential.cert(require(serviceAccountPath));
         if (admin.apps.length === 0) admin.initializeApp(adminConfig);
+        firebaseStatus = "🟢 Service Account Active (File)";
         console.log("✅ Firebase Admin: Cloud Sync Enabled via FILE");
     } else {
         if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
-        console.log("⚠️ Firebase Admin: Local Mode (No Credentials) - Database actions might fail");
+        firebaseStatus = "🔴 Local Mode (No Credentials)";
+        console.log("⚠️ Firebase Admin: Local Mode");
     }
 } catch (e) {
     if (admin.apps.length === 0) admin.initializeApp({ projectId: adminConfig.projectId });
+    firebaseStatus = "❌ Init Failed";
     console.error("❌ Firebase Initialization Error:", e.message);
 }
 const db = admin.firestore();
@@ -280,11 +287,11 @@ if (bot) {
         const hasWebhook = userDoc.exists && userDoc.data().webhookUrl;
         
         const statusText = `📡 **สถานะระบบ Stacy**
-- 🟢 Engine: Moonshot Kimi K2 (Active)
-- 🟢 Backend: Render Cloud
-- 🟢 Database: Firebase Cloud Sync
-- ${hasWebhook ? '🟢 Webhook: Connected (Calendar Ready)' : '🔴 Webhook: Not Set (Calendar Disabled)'}
-- 🕒 Timezone: Asia/Bangkok`;
+254: - 🟢 Engine: Moonshot Kimi K2 (Active)
+255: - 🟢 Backend: Render Cloud
+256: - Database Path: ${firebaseStatus}
+257: - ${hasWebhook ? '🟢 Webhook: Connected (Calendar Ready)' : '🔴 Webhook: Not Set (Calendar Disabled)'}
+258: - 🕒 Timezone: Asia/Bangkok`;
         ctx.reply(statusText);
     });
     
