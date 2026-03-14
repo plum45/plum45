@@ -25,17 +25,15 @@ try {
     if (serviceAccountEnv) {
         let parsedCreds;
         try {
+            // Super clean: Remove control characters and whitespace that might break JSON
             let cleanEnv = serviceAccountEnv.trim();
-            // Handle if user accidentally added quotes around the whole thing
+            // Remove non-printable characters (common copy-paste issue)
+            cleanEnv = cleanEnv.replace(/[\u0000-\u001F\u007F-\u009F]/g, "");
+            
             if ((cleanEnv.startsWith('"') && cleanEnv.endsWith('"')) || (cleanEnv.startsWith("'") && cleanEnv.endsWith("'"))) {
                 cleanEnv = cleanEnv.substring(1, cleanEnv.length - 1);
             }
             
-            // If it doesn't look like JSON, it's definitely an error
-            if (!cleanEnv.startsWith('{')) {
-                throw new Error("Missing start brace { - check if you copied the whole code!");
-            }
-
             parsedCreds = JSON.parse(cleanEnv.replace(/\\n/g, '\n'));
             adminConfig.credential = admin.credential.cert(parsedCreds);
             if (admin.apps.length === 0) admin.initializeApp(adminConfig);
