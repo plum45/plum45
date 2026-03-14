@@ -59,7 +59,7 @@ async function saveBotMemory(userId, userMsg, botReply) {
         const res = await axios.post(NVIDIA_API_URL, {
             model: 'qwen/qwen2.5-7b-instruct',
             messages: [
-                { role: 'system', content: 'Identify 1-3 important details about the user. STIRCTLY USE THAI (ภาษาไทยเท่านั้น). NO CHINESE CHARACTERS.' },
+                { role: 'system', content: 'Identify 1-3 important details OR behavioral patterns about the user. (เช่น ชอบทำงานตอนดึก, สนใจเรื่อง AI, มีนัดทุกวันจันทร์). STIRCTLY USE THAI (ภาษาไทยเท่านั้น).' },
                 { role: 'user', content: `Message: ${userMsg}\nResponse: ${botReply}` }
             ],
             max_tokens: 150
@@ -136,6 +136,19 @@ async function handleAgentActions(userId, replyText, ctx) {
                     }
                 } else {
                     await ctx.reply(`❌ ยังไม่ได้ตั้งค่า Webhook สำหรับ Google Calendar ครับ กรุณาใช้คำสั่ง "เชื่อมต่อ Webhook ไปที่ [URL]" ก่อนครับ`);
+                }
+                break;
+            case 'GENERATE_REPORT':
+                // Pillar 3: Export Logs to Google Sheets/External Dashboard
+                const logsSnapshot = await userRef.collection('logs').orderBy('timestamp', 'desc').limit(50).get();
+                const reportContent = logsSnapshot.docs.map(doc => doc.data());
+                
+                const webhook = (await userRef.get()).data()?.webhookUrl;
+                if (webhook) {
+                    await axios.post(webhook, { action: 'LOG_REPORT', data: reportContent });
+                    await ctx.reply(`📊 รวบรวมข้อมูลเสร็จแล้ว! ส่งรายงาน 50 รายการล่าสุดไปยัง Google Sheets เรียบร้อยครับ`);
+                } else {
+                    await ctx.reply(`❌ ยังไม่ได้ตั้งค่า Webhook ครับ ไม่สามารถส่งรายงานได้`);
                 }
                 break;
         }
@@ -330,13 +343,14 @@ if (bot) {
                 2. To log hours/notes: [ACTION: WORK_LOG {"note": "...", "type": "..."}]
                 3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "YYYY-MM-DDTHH:mm:ss", "description": "..."}]
                 4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
+                5. To export work logs: [ACTION: GENERATE_REPORT {}]
 
                 [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
                 [REASONING GUIDELINES]:
                 1. Task Decomposition: Understand the goal. 
-                2. Self-Correction: Ensure facts match the current date.
-                3. Connectivity: Maintain context with previous chats.
+                2. Self-Correction: Identify user routines and patterns from MEMORY. 
+                3. Proactivity: If user seems busy, suggest using GENERATE_REPORT for easier tracking.
                 4. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
                 5. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
                 ...userStore.history.slice(-8),
