@@ -178,6 +178,8 @@ const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY && process.env.NVIDIA_API_KEY
     : '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';
 const OPENAQ_API_KEY = process.env.OPENAQ_API_KEY || 'YOUR-OPENAQ-API-KEY'; // Replace with your key
 const OPENAQ_API_URL = 'https://api.openaq.org/v3';
+const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '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';
+const TAVILY_API_URL = 'https://api.tavily.com/search';
 
 const DEFAULT_MODEL = 'z-ai/glm5';
 
@@ -510,49 +512,29 @@ async function performSearch(userQuery) {
             return "";
         }
 
-        // 2. Parallel Web Search (DDG + Google) - Ultra Fast for Vercel
-        const searchPromises = [
-            async () => {
-                const res = await axios.get(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(userQuery)}`, {
-                    headers: { 'User-Agent': 'Mozilla/5.0' },
-                    timeout: 2500
-                });
-                const $ = cheerio.load(res.data);
-                const localResults = [];
-                $('.result__body').each((i, el) => {
-                    if (i < 2) {
-                        const t = $(el).find('.result__a').text().trim(), s = $(el).find('.result__snippet').text().trim();
-                        if (t && s) localResults.push(`[Source: Web] ${t}: ${s}`);
-                    }
-                });
-                return localResults;
-            },
-            async () => {
-                const res = await axios.get(`https://www.google.com/search?q=${encodeURIComponent(userQuery)}&hl=th`, {
-                    headers: { 'User-Agent': 'Mozilla/5.0' },
-                    timeout: 2500
-                });
-                const $ = cheerio.load(res.data);
-                const localResults = [];
-                $('div.g').each((i, el) => {
-                    if (i < 2) {
-                        const t = $(el).find('h3').text().trim(), s = $(el).find('div.VwiC3b').text().trim();
-                        if (t && s) localResults.push(`[Source: Google] ${t}: ${s}`);
-                    }
-                });
-                return localResults;
-            }
-        ];
+        // 2. Tavily AI Search (AI-optimized, no scraping needed)
+        try {
+            const tavilyRes = await axios.post(TAVILY_API_URL, {
+                api_key: TAVILY_API_KEY,
+                query: userQuery,
+                search_depth: "basic",
+                max_results: 3
+            }, { timeout: 5000 });
 
-        const allResults = await Promise.allSettled(searchPromises.map(p => p()));
-        allResults.forEach(r => {
-            if (r.status === 'fulfilled' && r.value) searchResults.push(...r.value);
-        });
+            if (tavilyRes.data?.results) {
+                tavilyRes.data.results.forEach(r => {
+                    searchResults.push(`[Source: ${r.url}] ${r.title}: ${r.content}`);
+                });
+            }
+        } catch (e) {
+            console.error('Tavily Search Failed:', e.message);
+            searchResults.push(`[SYSTEM NOTE: Tavily Search failed. Fallback to general knowledge.]`);
+        }
 
         if (weatherData || searchResults.length > 0) {
             return `\n\n[CRITICAL REAL-TIME DATA]:\n${weatherData}${searchResults.join('\n\n')}\n`;
         }
-        return `\n\n[SYSTEM NOTE: Web search returned no results. Inform the user you cannot fetch real-time info right now.]\n`;
+        return `\n\n[SYSTEM NOTE: Search returned no results.]\n`;
     } catch (e) {
         return `\n\n[SYSTEM NOTE: Search FAILED due to technical error.]\n`;
     }
