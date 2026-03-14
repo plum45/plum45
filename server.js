@@ -160,31 +160,42 @@ async function handleAgentActions(userId, replyText, ctx) {
                 await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
                 break;
             case 'ADD_CALENDAR_EVENT':
-                // Dispatch to Google Calendar via Webhook (Apps Script / Make)
+                // Pillar 3: Save to internal Task list FIRST (Backup)
+                const internalTask = {
+                    title: data.title,
+                    time: data.startTime || data.time,
+                    status: 'pending',
+                    createdAt: new Date(),
+                    syncedToCalendar: false
+                };
+                const taskRef = await userRef.collection('tasks').add(internalTask);
+
+                // Dispatch to Google Calendar via Webhook
                 const userDoc = await userRef.get();
                 const webhookUrl = userDoc.exists ? userDoc.data().webhookUrl : null;
                 
                 if (webhookUrl) {
                     try {
-                        console.log(`🔗 [ACTION] Dispatching to Webhook: ${webhookUrl} for User: ${userId}`);
+                        console.log(`🔗 [ACTION] Dispatching to Webhook: ${webhookUrl}`);
                         const response = await axios.post(webhookUrl, {
                             action: 'ADD_CALENDAR',
                             title: data.title,
                             start: data.startTime || data.time,
                             description: data.description || `Added by Stacy AI via Telegram`
-                        }, { timeout: 10000 });
+                        }, { timeout: 15000 });
                         
-                        if (response.status === 200 || response.status === 201) {
-                            await ctx.reply(`📅 ส่งข้อมูลไปที่ Google Calendar เรียบร้อยแล้วครับ!`);
+                        if (response.data && (response.data.status === 'success' || response.status === 200)) {
+                            await taskRef.update({ syncedToCalendar: true });
+                            await ctx.reply(`📅 ลงนัดใน Google Calendar เรียบร้อยครับ!\n(คุณสามารถเช็ครายการทั้งหมดได้ด้วยคำสั่ง /schedule นะครับ)`);
                         } else {
-                            throw new Error(`HTTP Status ${response.status}`);
+                            throw new Error(response.data?.message || `HTTP Status ${response.status}`);
                         }
                     } catch (err) {
                         console.error('Webhook Error:', err.message);
-                        await ctx.reply(`⚠️ พบปัญหาในการส่งข้อมูลไปที่ Google Calendar: ${err.message}\n(ตรวจสอบว่าคุณกด Deploy เป็น "Anyone" และใช้ URL ล่าสุดหรือยังครับ)`);
+                        await ctx.reply(`⚠️ ส่งไป Calendar ไม่สำเร็จ: ${err.message}\n\nแตไม่ต้องห่วงครับ! Stacy จดบันทึกไว้ในตารางงานส่วนตัวให้แล้ว (เช็คได้ที่ /schedule ครับ)`);
                     }
                 } else {
-                    await ctx.reply(`❌ ยังไม่ได้ตั้งค่า Webhook สำหรับ Google Calendar ครับ กรุณาใช้คำสั่ง "เชื่อมต่อ Webhook ไปที่ [URL]" ก่อนครับ`);
+                    await ctx.reply(`✅ บันทึกงานเรียบร้อยครับ! (แต่ยังไม่ได้ลง Calendar เพราะยังไม่มี Webhook ครับ)`);
                 }
                 break;
             case 'GENERATE_REPORT':
