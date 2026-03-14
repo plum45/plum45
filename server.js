@@ -109,6 +109,27 @@ async function handleAgentActions(userId, replyText, ctx) {
                 await userRef.set({ webhookUrl: data.url }, { merge: true });
                 await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
                 break;
+            case 'ADD_CALENDAR_EVENT':
+                // Dispatch to Google Calendar via Webhook (Apps Script / Make)
+                const userDoc = await userRef.get();
+                const webhookUrl = userDoc.exists ? userDoc.data().webhookUrl : null;
+                
+                if (webhookUrl) {
+                    try {
+                        await axios.post(webhookUrl, {
+                            action: 'ADD_CALENDAR',
+                            title: data.title,
+                            start: data.startTime || data.time,
+                            description: data.description || `Added by Stacy AI`
+                        });
+                        await ctx.reply(`📅 ส่งข้อมูลไปที่ Google Calendar เรียบร้อยแล้วครับ!`);
+                    } catch (err) {
+                        await ctx.reply(`⚠️ เชื่อมต่อ Google Calendar ไม่สำเร็จ (Webhook Error)`);
+                    }
+                } else {
+                    await ctx.reply(`❌ ยังไม่ได้ตั้งค่า Webhook สำหรับ Google Calendar ครับ กรุณาใช้คำสั่ง "เชื่อมต่อ Webhook ไปที่ [URL]" ก่อนครับ`);
+                }
+                break;
         }
     } catch (e) { console.error('Action Logic Error:', e.message); }
 }
@@ -176,16 +197,17 @@ if (bot) {
 
                 [ACTION CAPABILITIES]:
                 You can trigger actions by adding this text at the END of your reply:
-                1. To save a task: [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
+                1. To save a task (in Stacy's list): [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
                 2. To log hours/notes: [ACTION: WORK_LOG {"note": "...", "type": "..."}]
-                3. To sync with web apps: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
+                3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}]
+                4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
 
                 [REASONING GUIDELINES]:
                 1. Task Decomposition: Understand the goal. 
                 2. Self-Correction: Ensure facts match the current date.
                 3. Connectivity: Maintain context with previous chats.
                 4. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
-                5. INTEGRATION: If user wants to "schedule" or "log", emit the [ACTION] tag.` },
+                5. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
                 ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
