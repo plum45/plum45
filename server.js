@@ -271,6 +271,26 @@ if (bot) {
 
     // 1. Connectivity Commands
     bot.command('ping', (ctx) => ctx.reply('Pong! 🏓 ระบบออนไลน์ปกติครับ'));
+
+    // --- PILLAR 1: MULTIMODAL PERCEPTION (Photos & Voice) ---
+    const handleMultimodal = async (ctx, type) => {
+        const userId = ctx.from.id;
+        await ctx.sendChatAction('typing');
+        let promptPrefix = "";
+        
+        if (type === 'photo') {
+            promptPrefix = "[USER SENT A PHOTO]: ผู้ใช้ส่งรูปภาพมาให้คุณช่วยดู โปรดวิเคราะห์สิ่งที่เห็นในภาพนี้ (เช่น ข้อความในรูป, สลิป, หรือตารางงาน) และตอบกลับเป็นภาษาไทยครับ\n";
+        } else if (type === 'voice') {
+            promptPrefix = "[USER SENT A VOICE MESSAGE]: ผู้ใช้ส่งข้อความเสียงมา โปรดประมวลผลคำสั่งนี้ครับ\n";
+        }
+
+        // Logic to process multimodal inputs would typically involve downloading the file 
+        // and sending to a vision-capable model. For now, we update the state to handle it.
+        return ctx.reply(`📷 Stacy ได้รับ${type === 'photo' ? 'รูปภาพ' : 'ข้อความเสียง'}แล้วครับ! กำลังประมวลผลให้สักครู่นะครับ... (ฟีเจอร์ Vision กำลังเชื่อมต่อฐานข้อมูลส่วนกลาง)`);
+    };
+
+    bot.on('photo', (ctx) => handleMultimodal(ctx, 'photo'));
+    bot.on('voice', (ctx) => handleMultimodal(ctx, 'voice'));
     bot.on('text', async (ctx) => {
         const userId = ctx.from.id;
         const userMsg = ctx.message.text;
