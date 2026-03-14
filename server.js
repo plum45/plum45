@@ -421,8 +421,19 @@ async function performSearch(userQuery) {
         // 1. Precise Weather (Geocoding + Open-Meteo)
         if (isWeatherQuery) {
             try {
-                const cityMatch = userQuery.match(/(ที่|ใน|เมือง|แถว)\s*([ก-๙a-zA-Z\s]+)/);
-                const city = cityMatch ? cityMatch[2].trim() : "Bangkok";
+                // Improved City Extraction: Remove common keywords and find the city
+                let city = "";
+                const cleanForCity = userQuery.replace(/สภาพอากาศ|อากาศ|เช็ค|ดู|พยากรณ์|วันนี้|เย็นนี้|พรุ่งนี้|ตอนนี้/g, "").trim();
+                const cityMatch = cleanForCity.match(/(?:ที่|ใน|เมือง|แถว|จังหวัด)?\s*([ก-๙a-zA-Z\s]{2,})/);
+                
+                if (cityMatch) {
+                    city = cityMatch[1].trim();
+                } else {
+                    city = cleanForCity || "Bangkok";
+                }
+
+                console.log(`📍 Extracted City: "${city}" for query: "${userQuery}"`);
+
                 const geoRes = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(city)}&limit=1`, {
                     headers: { 'User-Agent': 'QwenChat/1.0' },
                     timeout: 5000
@@ -436,7 +447,7 @@ async function performSearch(userQuery) {
 - Humidity: ${cur.relative_humidity_2m}%
 - Condition: ${cur.rain > 0 ? 'Rainy' : cur.showers > 0 ? 'Showers' : cur.cloud_cover > 50 ? 'Cloudy' : 'Clear'}
 - Wind: ${cur.wind_speed_10m} km/h
-(Data as of: ${new Date().toLocaleString('th-TH')})\n\n`;
+(Data as of: ${new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })})\n\n`;
                 }
             } catch (e) { console.error('Weather logic failed:', e.message); }
         }
