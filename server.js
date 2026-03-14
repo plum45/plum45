@@ -135,12 +135,13 @@ if (bot) {
                 { role: 'user', content: userMsg }
             ];
 
-            // --- PILLAR 1: PROCESSING ENGINE (Probabilistic Logic via Qwen Turbo) ---
+            // --- PILLAR 1: PROCESSING ENGINE (Probabilistic Logic via Moonshot Kimi K2) ---
             const response = await axios.post(NVIDIA_API_URL, {
-                model: 'qwen/qwen2.5-7b-instruct',
+                model: 'moonshotai/kimi-k2-instruct',
                 messages: promptMessages,
-                temperature: 0.7,
-                max_tokens: 1024
+                temperature: 0.6,
+                top_p: 0.9,
+                max_tokens: 4096
             }, {
                 headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
                 timeout: 20000 
@@ -176,7 +177,7 @@ if (bot) {
 const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY && process.env.NVIDIA_API_KEY.length > 10) 
     ? process.env.NVIDIA_API_KEY 
-    : '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';
+    : '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';
 const OPENAQ_API_KEY = process.env.OPENAQ_API_KEY || 'YOUR-OPENAQ-API-KEY'; // Replace with your key
 const OPENAQ_API_URL = 'https://api.openaq.org/v3';
 const TAVILY_API_KEY = process.env.TAVILY_API_KEY || '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';
