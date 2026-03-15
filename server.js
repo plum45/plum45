@@ -612,9 +612,9 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
         8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
         9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
-        10. **CALENDAR RULE**: ทุกครั้งที่ใช้ SAVE_TASK หรือ ADD_CALENDAR_EVENT ต้องส่งค่า "time" เป็น ISO 8601 (YYYY-MM-DDTHH:mm:00) 
-        11. **CREATIVE TITLING**: เจ้านายอยากได้ความเก๋! เมื่อบันทึกนัดหมาย ให้ตั้งชื่อ (title) ให้พรีเมียมและน่าสนใจ (เช่น "Dinner" -> "🍽️ Gastronomy Night") แต่ยังสื่อถึงเรื่องเดิม
-        12. **CONNECTION STATUS**: ระบบ Google Calendar เชื่อมต่อ "พร้อมใช้งาน" แล้ว (${memory.calendarConnected ? '🟢 Connected' : '🔴 Hidden URL - Ask User if sync fails'}) ไม่ต้องบอกเจ้านายว่ายังไม่เชื่อมต่ออีก`;
+        10. **CALENDAR RULE**: เมื่อเจ้านายสั่งนัดหมาย **ต้อง** ใส่ [ACTION: ADD_CALENDAR_EVENT {"title": "...", "time": "...", "description": "..."}] เสมอ โดยค่า "time" ต้องเป็น ISO 8601 (YYYY-MM-DDTHH:mm:00)
+        11. **CREATIVE TITLING (เด็ดขาด)**: เจ้านายชอบความพรีเมียม! ให้ตั้งชื่อนัดให้เก๋ไก๋และดูแพง (เช่น "นัดประชุม" -> "🚀 Strategic Synergy: ปั้นไอเดียขับเคลื่อนองค์กร") แต่ต้องเหลือเค้าโครงเดิมให้เจ้านายรู้ว่าคืออะไร
+        12. **GOOGLE CALENDAR CONNECTION**: ขณะนี้เจ้านายเชื่อมต่อ Google Calendar สำเร็จแล้ว (🟢 Status: Connected) ทุกนัดที่เจ้านายสั่งผ่านคุณจะถูก "เด้ง" ไปที่ปฏิทินของเขาโดยตรงผ่าน Google Webhook ที่ตั้งค่าไว้แล้ว ห้ามบอกเจ้านายว่ายังไม่ได้เชื่อมต่อ`;
 
 
 
@@ -633,6 +633,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         });
 
         const reply = response.data.choices[0].message.content;
+        console.log(`[Stacy Response for ${userId}]:`, reply);
         const { cleanText, actions } = extractActions(reply);
         
         // Using smartReply for robust delivery (Chunking support)
