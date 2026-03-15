@@ -172,12 +172,14 @@ async function handleAgentActions(userId, replyText, ctx) {
                 }
                 break;
             case 'CREATE_SKILL':
-                // Pillar 6: User-defined Skills
+            case 'UPDATE_SKILL':
+                // Pillar 6: User-defined Skills (Manual & Adaptive)
                 await userRef.collection('skills').doc(data.name).set({
                     ...data,
-                    createdAt: new Date()
-                });
-                await ctx.reply(`✨ สกิลใหม่ถูกติดตั้งแล้ว: **"${data.name}"**\nคุณสามารถเรียกใช้งานได้โดยพิมพ์ "ใช้สกิล ${data.name} [เนื้อหา]" ครับ`);
+                    updatedAt: new Date()
+                }, { merge: true });
+                const actionVerb = action === 'CREATE_SKILL' ? 'ติดตั้ง' : 'ปรับปรุง';
+                await ctx.reply(`✨ ${actionVerb}สกิล **"${data.name}"** เรียบร้อยแล้วครับ!\n${data.description ? `📝 รายละเอียด: ${data.description}` : ''}\n\nคุณสามารถลองใช้งานหรือสั่งผมให้ปรับปรุงสกิลนี้เพิ่มเติมได้ตลอดเวลาครับ`);
                 break;
             case 'IMPORT_SKILL_FROM_URL':
                 // Pillar 6: Skill Scraping & Porting
@@ -492,21 +494,23 @@ if (bot) {
                 3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "YYYY-MM-DDTHH:mm:ss", "description": "..."}]
                 4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
                 5. To export work logs: [ACTION: GENERATE_REPORT {}]
-                6. To CREATE A NEW SKILL (Pillar 6): [ACTION: CREATE_SKILL {"name": "...", "description": "...", "instructions": "How to perform this skill"}]
-                7. To IMPORT A SKILL FROM URL: [ACTION: IMPORT_SKILL_FROM_URL {"url": "...", "name": "Optional Name"}]
-                8. To DRAW A REAL IMAGE: [ACTION: IMAGE_GEN {"prompt": "English description of the image"}]
+                6. To CREATE A NEW SKILL: [ACTION: CREATE_SKILL {"name": "...", "description": "...", "instructions": "..."}]
+                7. To UPDATE/ADAPT AN EXISTING SKILL: [ACTION: UPDATE_SKILL {"name": "...", "description": "...", "instructions": "..."}]
+                8. To IMPORT A SKILL FROM URL: [ACTION: IMPORT_SKILL_FROM_URL {"url": "...", "name": "Optional Name"}]
+                9. To DRAW A REAL IMAGE: [ACTION: IMAGE_GEN {"prompt": "..."}]
 
                 [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
                 [REASONING GUIDELINES]:
                 1. Task Decomposition: Understand the goal. 
-                2. Skill Invocation: If user asks to use a specific skill from the library, strictly follow those [USER SKILLS LIBRARY] instructions.
-                3. Self-Correction: Identify user routines and patterns from MEMORY. 
-                4. Proactivity: If user seems busy, suggest using GENERATE_REPORT for easier tracking.
-                5. CREATE SKILL: If user asks to "สร้างสกิล" or "เพิ่มความสามารถใหม่", use CREATE_SKILL action.
-                6. IMAGE GENERATION: If user asks to "วาดรูป", "เจนภาพ", or "draw", use IMAGE_GEN with a descriptive English prompt.
-                7. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
-                8. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
+                2. Adaptive learning: If user gives feedback on how a skill worked, use UPDATE_SKILL to refine its instructions automatically.
+                3. Manual Installation: If user pastes prompt instructions or markdown, suggest saving them as a new skill using CREATE_SKILL.
+                4. Skill Invocation: If user asks to use a specific skill from the library, strictly follow those [USER SKILLS LIBRARY] instructions.
+                5. Self-Correction: Identify user routines and patterns from MEMORY. 
+                6. Proactivity: Offer to create skills for repetitive tasks you notice.
+                7. IMAGE GENERATION: If user asks to "วาดรูป", "เจนภาพ", or "draw", use IMAGE_GEN with a descriptive English prompt.
+                8. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
+                9. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
                 ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
