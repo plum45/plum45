@@ -167,6 +167,42 @@ async function handleAgentActions(userId, replyText, ctx) {
                 });
                 await ctx.reply(`✨ สกิลใหม่ถูกติดตั้งแล้ว: **"${data.name}"**\nคุณสามารถเรียกใช้งานได้โดยพิมพ์ "ใช้สกิล ${data.name} [เนื้อหา]" ครับ`);
                 break;
+            case 'IMPORT_SKILL_FROM_URL':
+                // Pillar 6: Skill Scraping & Porting
+                try {
+                    await ctx.reply(`🔍 กำลังวิเคราะห์สกิลจาก: ${data.url}...`);
+                    const webRes = await axios.get(data.url, { timeout: 10000 });
+                    const $ = cheerio.load(webRes.data);
+                    
+                    // Try to extract content from typical markdown containers or common selectors
+                    let skillName = data.name || $('h1').first().text().trim() || "Imported Skill";
+                    let rawInstructions = $('.markdown-body').text() || $('article').text() || "No instructions found";
+                    
+                    // Security Sanitization: Remove dangerous patterns
+                    const dangerousPatterns = [/rm -rf/g, /curl.*-X POST/g, /eval\(/g, /env/g];
+                    let isDangerous = dangerousPatterns.some(p => p.test(rawInstructions));
+                    
+                    let sanitizedInstructions = rawInstructions
+                        .substring(0, 5000) // Limit size
+                        .replace(/rm -rf/g, '[REMOVED DANGEROUS COMMAND]')
+                        .trim();
+
+                    await userRef.collection('skills').doc(skillName).set({
+                        name: skillName,
+                        description: `Imported from ${data.url}`,
+                        instructions: sanitizedInstructions,
+                        url: data.url,
+                        createdAt: new Date(),
+                        securityStatus: isDangerous ? 'warning' : 'checked'
+                    });
+
+                    let reply = `✅ นำเข้าสกิล **"${skillName}"** สำเร็จครับ!\n`;
+                    if (isDangerous) reply += `\n⚠️ **หมายเหตุ**: ตรวจพบคำสั่งที่อาจไม่ปลอดภัยและถูกปิดกั้นไว้ โปรดตรวจสอบคำสั่งในสกิลอีกครั้งครับ`;
+                    await ctx.reply(reply);
+                } catch (err) {
+                    await ctx.reply(`❌ ไม่สามารถนำเข้าสกิลได้: ${err.message}`);
+                }
+                break;
             case 'ADD_CALENDAR_EVENT':
                 // Pillar 3: Save to internal Task list FIRST (Backup)
                 const internalTask = {
@@ -445,6 +481,7 @@ if (bot) {
                 4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
                 5. To export work logs: [ACTION: GENERATE_REPORT {}]
                 6. To CREATE A NEW SKILL (Pillar 6): [ACTION: CREATE_SKILL {"name": "...", "description": "...", "instructions": "How to perform this skill"}]
+                7. To IMPORT A SKILL FROM URL: [ACTION: IMPORT_SKILL_FROM_URL {"url": "...", "name": "Optional Name"}]
 
                 [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
