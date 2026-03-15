@@ -467,12 +467,22 @@ async function performSearch(query) {
 
 async function processStacyAI(ctx, userMsg, fileContext = null) {
     const userId = ctx.from.id;
-    // Enhanced Time Context for Calendar Accuracy
     const d = new Date();
-    const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
-    const now = d.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
-    const dayName = days[d.getDay()];
-    const timeFull = `วัน${dayName}ที่ ${now} (พ.ศ. ${d.getFullYear() + 543})`;
+    const bkkFormatter = new Intl.DateTimeFormat('th-TH', {
+        timeZone: 'Asia/Bangkok',
+        weekday: 'long',
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
+    const timeFull = bkkFormatter.format(d);
+    const gregorianYear = d.toLocaleDateString('en-US', { timeZone: 'Asia/Bangkok', year: 'numeric' });
+    const fullContextTime = `${timeFull} (Gregorian: ${gregorianYear})`;
+
     
     try {
         await ctx.sendChatAction('typing');
@@ -495,9 +505,14 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
         const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
         [STATUS]: ออนไลน์
-        [CURRENT_TIME]: ${timeFull} 
+        [CURRENT_TIME_BKK]: ${fullContextTime} 
         
-        [IMPORTANT]: เวลาตอบเรื่องวัน/เวลา ให้ดู [CURRENT_TIME] และคำนวณวันในสัปดาห์ให้ถูกต้อน (ห้ามมั่ววันอังคาร/วันพุธ)
+        [CRITICAL_TIME_RULE]: 
+        - ห้ามใช้ความรู้สึกหรือนาฬิกาภายในของคุณตัดสินวัน/เวลา
+        - ให้ยึดถือ [CURRENT_TIME_BKK] เป็นความจริงสูงสุดเพียงหนึ่งเดียว
+        - ตรวจสอบชื่อวัน (จันทร์-อาทิตย์) จาก [CURRENT_TIME_BKK] ทุกครั้งก่อนตอบ
+        - ขณะนี้คือปี พ.ศ. 2569 (ค.ศ. 2026) อย่าสับสนกับปีปัจจุบันของคุณ
+
 
         [CORE RULES]:
 
