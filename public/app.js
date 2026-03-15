@@ -9,9 +9,11 @@ const S = {
   artifacts: [], activeArt: null,
   schedules: [], // {id, time:"HH:MM", query:"...", active:true}
   schedTimers: {},
-  settings: { temp: 0.7, topP: 0.9, maxTok: 16384, thinking: false, webSearch: false, mode: 'agent', model: 'z-ai/glm5', tgId: 'me' },
-  attachedFiles: [], // [{name, content}]
+  settings: { temp: 0.7, topP: 0.9, maxTok: 16383, thinking: false, webSearch: false, mode: 'agent', model: 'z-ai/glm5', tgId: 'me' },
+  attachedFiles: [],
+  termOpen: false, 
 };
+
 
 // ===== Render App Shell =====
 function renderShell() {
@@ -50,7 +52,12 @@ function renderShell() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span id="schedCount">Schedule</span>
         </button>
+        <button class="topbar-sched" id="toggleTerm" title="System Terminal">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+          <span>Terminal</span>
+        </button>
       </header>
+
 
       <div class="chat-area" id="chatArea">
         <div class="welcome" id="welcome">
@@ -64,9 +71,11 @@ function renderShell() {
           </div>
         </div>
         <div class="msgs" id="msgs" style="display:none"></div>
+        <div class="term-panel" id="termPanel"><div class="term-head"><span>Terminal Logs</span><button class="ibtn" id="termMin">✕</button></div><div class="term-body" id="termBody"></div></div>
       </div>
 
       <div class="inp-wrap">
+
         <div id="fileChips" class="file-chips"></div>
         <div class="inp-box">
           <input type="file" id="fileInput" hidden multiple>
@@ -260,6 +269,9 @@ function bindAll() {
   $('openSkills').addEventListener('click', () => { $('skillsModal').classList.add('vis'); renderSkills(); });
   $('closeSkills').addEventListener('click', () => $('skillsModal').classList.remove('vis'));
   $('skAdd').addEventListener('click', addSkill);
+  $('toggleTerm').addEventListener('click', toggleTerm);
+  $('termMin').addEventListener('click', toggleTerm);
+
 
   // Calendar
   $('openCalendar').addEventListener('click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
@@ -904,9 +916,35 @@ async function streamResp(chat) {
     save();
   }
 
-  S.streaming = false; S.ctrl = null; updateSendBtn(); scrollBot();
   document.getElementById('input').focus();
 }
+
+// ===== Terminal Logic =====
+function toggleTerm() {
+    S.termOpen = !S.termOpen;
+    document.getElementById('termPanel').classList.toggle('vis', S.termOpen);
+    if (S.termOpen) initTerminal();
+}
+
+let termUnsub = null;
+function initTerminal() {
+    if (termUnsub) return;
+    const id = S.settings.tgId || 'me';
+    termUnsub = db.collection('userActivities').doc(id).collection('terminalLogs')
+        .orderBy('timestamp', 'desc').limit(20)
+        .onSnapshot(snap => {
+            const body = document.getElementById('termBody');
+            body.innerHTML = '';
+            snap.forEach(doc => {
+                const log = doc.data();
+                const el = document.createElement('div');
+                el.className = 'term-line';
+                el.innerHTML = `<span class="term-cmd">> ${esc(log.command)}</span><pre class="term-out">${esc(log.output)}</pre>`;
+                body.appendChild(el);
+            });
+        });
+}
+
 
 // ===== Tool Extraction =====
 function extractToolCalls(text) {

@@ -10,6 +10,9 @@ const pdf = require('pdf-parse');
 const cheerio = require('cheerio');
 const google = require('googlethis');
 const { exec } = require('child_process');
+const screenshot = require('screenshot-desktop');
+const si = require('systeminformation');
+const cron = require('node-cron');
 
 
 // ========== Configuration & Environment ==========
@@ -96,6 +99,18 @@ function extractActions(text) {
     const cleanText = text.replace(/\[ACTION:[\s\S]*?\]/g, '').trim();
     return { cleanText, actions };
 }
+
+async function logToTerminal(userId, command, output) {
+    if (!db) return;
+    try {
+        await db.collection('userActivities').doc(String(userId)).collection('terminalLogs').add({
+            command,
+            output: output.substring(0, 500),
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+    } catch (e) { console.error('Log to Terminal Error:', e); }
+}
+
 
 // OpenClaw-inspired: Intelligent Message Chunking
 async function smartReply(ctx, text) {
@@ -256,15 +271,44 @@ async function handleAgentActions(ctx, action, data, userId) {
             // Pillar 8: Terminal Authority (Personal Agent Mode)
             await ctx.reply(`💻 กำลังรันคำสั่ง: \`${data.command}\``);
             exec(data.command, { timeout: 30000 }, async (error, stdout, stderr) => {
+                const output = stdout || stderr || "(ไม่มีข้อมูลส่งกลับ)";
+                await logToTerminal(userId, data.command, output);
                 if (error) {
                     await ctx.reply(`❌ คำสั่งขัดข้อง:\n\`\`\`\n${error.message}\n\`\`\``);
                     return;
                 }
-                const output = stdout || stderr || "(ไม่มีข้อมูลส่งกลับ)";
                 await smartReply(ctx, `🖥️ ผลลัพธ์จากคอมพิวเตอร์:\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
             });
             break;
+        case 'SCREEN_CAPTURE':
+            try {
+                const imgPath = path.join(__dirname, `screenshot_${Date.now()}.png`);
+                await screenshot({ filename: imgPath });
+                await ctx.replyWithPhoto({ source: imgPath }, { caption: '📸 จับภาพหน้าจอปัจจุบันให้แล้วครับเจ้านาย' });
+                fs.unlinkSync(imgPath); // Delete after send
+                await logToTerminal(userId, 'SCREEN_CAPTURE', 'Captured and sent to Telegram');
+            } catch (err) { ctx.reply(`❌ แคปหน้าจอไม่สำเร็จ: ${err.message}`); }
+            break;
+        case 'GET_PC_STATS':
+            try {
+                const [cpu, mem, load] = await Promise.all([si.cpu(), si.mem(), si.currentLoad()]);
+                const stats = `🖥️ **PC Status Update**\n- CPU: ${cpu.manufacturer} ${cpu.brand}\n- Load: ${load.currentLoad.toFixed(2)}%\n- RAM: ${(mem.used / 1024/1024/1024).toFixed(2)} / ${(mem.total / 1024/1024/1024).toFixed(2)} GB`;
+                await ctx.reply(stats);
+                await logToTerminal(userId, 'GET_PC_STATS', stats);
+            } catch (err) { ctx.reply(`❌ ดึงข้อมูลระบบไม่สำเร็จ: ${err.message}`); }
+            break;
+        case 'MORNING_BRIEF':
+            try {
+                await ctx.reply('☀️ กำลังรวบรวม Morning Briefing ให้เจ้านายสักครู่ครับ...');
+                const query = data.interests || "ข่าวยอดนิยมวันนี้";
+                const news = await performSearch(query);
+                const brief = `☀️ **Morning Briefing วันนี้**\n\n📌 **สรุปข่าว:**\n${news.substring(0, 500)}...\n\n🎶 **คำแนะนำวันนี้:**\nลองฟังเพลง "Lo-fi Chill" เพื่อสมาธิที่ดีนะครับ!\n\n📅 **คิวงานวันนี้:**\n(ตรวจสอบได้ที่หน้า Dashboard ตลอดเวลาครับ)`;
+                await smartReply(ctx, brief);
+                await logToTerminal(userId, 'MORNING_BRIEF', 'Morning briefing delivered');
+            } catch (err) { ctx.reply(`❌ Morning Brief ไม่สำเร็จ: ${err.message}`); }
+            break;
         case 'READ_FILE':
+
             try {
                 const content = fs.readFileSync(data.path, 'utf8');
                 await smartReply(ctx, `📄 เนื้อหาไฟล์ \`${data.path}\`:\n\n${content.substring(0, 3500)}`);
@@ -370,10 +414,17 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - [ACTION: SEARCH_MEMORIES {}]
         - [ACTION: EXECUTE_COMMAND {"command": "..."}]
         - [ACTION: READ_FILE {"path": "..."}]
+        - [ACTION: SCREEN_CAPTURE {}]
+        - [ACTION: GET_PC_STATS {}]
+        - [ACTION: MORNING_BRIEF {"interests": "..."}]
 
         [REASONING GUIDELINES]:
+        - หากเจ้านายสั่ง "แคปจอ", "ถ่ายรูปหน้าจอ" ให้ใช้ [ACTION: SCREEN_CAPTURE]
+        - หากเจ้านายสั่ง "ขอดูสเปก", "เช็คแรม", "สเตตัสคอม" ให้ใช้ [ACTION: GET_PC_STATS]
+        - หากเจ้านายต้องการสรุปช่วงเช้า หรือ "Morning Brief" ให้ใช้ [ACTION: MORNING_BRIEF]
         - หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม", "เช็คไฟล์" หรือ "รันโค้ด" ให้ใช้ [ACTION: EXECUTE_COMMAND]. (ระวังคำสั่งที่อันตราย!)
         - หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE] พร้อมระบุ Path ให้ถูกต้อง
+
         - หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES]
         - หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN]
         - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)`;
