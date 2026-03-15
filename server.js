@@ -232,7 +232,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                 type: data.type || 'general',
                 timestamp: admin.firestore.FieldValue.serverTimestamp()
             });
-            await ctx.reply(`📝 บันทึกกิจกรรมให้แล้วครับ: ${data.note}`);
+            await ctx.reply(`📝 บันทึกกิจกรรมให้แล้วนะคะเจ้านาย: ${data.note}`);
             break;
         case 'SYNC_USER':
             // Automatically handled by syncUser middleware now, but kept for explicit calls
@@ -240,7 +240,7 @@ async function handleAgentActions(ctx, action, data, userId) {
 
         case 'IMAGE_GEN':
             // Pillar 7: The "No-Failure" Visual Protocol (OpenClaw delivery style)
-            const loadingMsg = await ctx.reply('🎨 Stacy กำลังรังสรรค์รูปภาพให้ครับเจ้านาย... (อาจใช้เวลา 15-45 วินาที)');
+            const loadingMsg = await ctx.reply('🎨 Stacy กำลังรังสรรค์รูปภาพให้เจ้านายอยู่นะคะ... (อาจใช้เวลา 15-45 วินาที)');
             try {
                 const rawPrompt = data.prompt || "highly detailed masterpiece";
                 const cleanPrompt = rawPrompt.replace(/[^\w\s]/gi, '').substring(0, 300) || "digital art";
@@ -637,7 +637,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const { cleanText, actions } = extractActions(reply);
         
         // Using smartReply for robust delivery (Chunking support)
-        await smartReply(ctx, cleanText || "ผมกำลังประมวลผลข้อมูลอยู่ครับ...");
+        await smartReply(ctx, cleanText || "หนูกำลังประมวลผลข้อมูลอยู่ค่ะเจ้านาย...");
         
         for (const action of actions) {
             await handleAgentActions(ctx, action.type, action.data, userId);
@@ -650,7 +650,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         
     } catch (e) {
         console.error('AI Error:', e);
-        ctx.reply('🙏 ขออภัยครับ ระบบประมวลผลติดขัดเล็กน้อย รบกวนลองใหม่อีกครั้งครับ');
+        ctx.reply('🙏 ขออภัยค่ะเจ้านาย ระบบประมวลผลติดขัดเล็กน้อย รบกวนลองใหม่อีกครั้งนะคะ');
     }
 }
 
@@ -666,11 +666,11 @@ if (bot) {
     ]).resize();
 
     bot.start((ctx) => {
-        ctx.reply(`✨ **Stacy Premium v1.2.5**\n\nสวัสดีครับเจ้านาย! ผมคือ Stacy 7-Pillar AI พร้อมดูแลทั้งงานเขียนโค้ด, นัดหมาย และระบบอัตโนมัติแล้วครับ\n\n🚀 **เริ่มต้นใช้งาน:**\n- ลองพิมพ์สั่งงานผมได้เลย\n- หรือใช้เมนูด้านล่างเพื่อดูข้อมูลระบบครับ`, mainMenu);
+        ctx.reply(`✨ **Stacy Premium v1.2.5**\n\nสวัสดีค่ะเจ้านาย! หนูคือ Stacy 7-Pillar AI เลขาคนเก่ง (และแอบขี้เล่น) พร้อมดูแลทั้งงานเขียนโค้ด, นัดหมาย และระบบอัตโนมัติแล้วนะคะ\n\n🚀 **เริ่มต้นใช้งาน:**\n- ลองพิมพ์สั่งงานหนูได้เลยจ๊ะ\n- หรือใช้เมนูด้านล่างเพื่อดูข้อมูลระบบนะคะ`, mainMenu);
     });
 
     bot.help((ctx) => {
-        ctx.reply(`📖 **คู่มือการใช้งาน Stacy AI**\n\n1. **การสั่งงาน:** พิมพ์คุยได้ปกติเหมือนคุยกับคน\n2. **นัดหมาย:** "เตือนฉันซ้อมวิ่งเย็นนี้ 6 โมง" (จะลิ้งค์ไปที่ Dashboard)\n3. **สกิลอัจฉริยะ:** "จดจำว่าถ้าฉันส่งโค้ด Python ให้คุณช่วยรีแฟคเตอร์ให้คลีนขึ้นด้วย"\n4. **ไฟล์:** ส่ง PDF หรือ Text ไฟล์มาให้สรุปได้\n\n💡 **Tip:** นำ ID ไปใส่ในหน้าเว็บเพื่อซิงค์ข้อมูลนัดหมายครับ`);
+        ctx.reply(`📖 **คู่มือการใช้งาน Stacy (เลขาขี้เล่น)**\n\n1. **การสั่งงาน:** พิมพ์คุยปกติได้เลยจ๊ะ เหมือนคุยกับเลขาคนสนิท\n2. **นัดหมาย:** "เตือนฉันซ้อมวิ่งเย็นนี้ 6 โมง" (พอบันทึกปุ๊บ จะเด้งไปที่ **Google Calendar** ของเจ้านายทันทีเลยค่ะ!)\n3. **สกิลอัจฉริยะ:** "จดจำว่าถ้าหนูส่งโค้ด... ให้เจ้านายช่วยรีแฟคเตอร์ด้วยนะ"\n4. **ไฟล์:** ส่ง PDF หรือ Text มาให้หนูสรุปงานให้ได้นะคะ\n\n💡 **Tip:** นำ ID ไปใส่ใน Dashboard เพื่อดูภาพรวมนัดหมายทั้งหมดได้นะคะ!`);
     });
 
     bot.hears('📡 Status', (ctx) => {
@@ -681,23 +681,23 @@ if (bot) {
 
     bot.hears('🧠 Who Am I?', async (ctx) => {
         const memory = await getBotMemory(ctx.from.id);
-        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n━━━━━━━━━━━━━━━━━━━━\n"${memory.identity}"\n━━━━━━━━━━━━━━━━━━━━\n\n*(หากต้องการปรับเปลี่ยน บุคลิก สั่งผมได้เลยครับ)*`);
+        ctx.reply(`🧠 **ตัวตนปัจจุบันของหนู:**\n━━━━━━━━━━━━━━━━━━━━\n"${memory.identity}"\n━━━━━━━━━━━━━━━━━━━━\n\n*(ถ้าอยากให้หนูเปลี่ยนนิสัย หรืออยากให้หนูเป็นใคร สั่งมาได้เลยนะคะ!)*`);
     });
 
     bot.hears('🛠️ Skills', async (ctx) => {
         const snap = await db.collection('userActivities').doc(String(ctx.from.id)).collection('skills').get();
-        if (snap.empty) return ctx.reply('🛠️ **ยังไม่มีสกิลที่ติดตั้งครับ**\nลองส่งชุดคำสั่งที่อยากให้ผมทำเป็นประจำมาสิครับ!');
-        let text = "🛠️ **คลังสกิลของคุณ:**\n━━━━━━━━━━━━━━━━━━━━\n";
+        if (snap.empty) return ctx.reply('🛠️ **เจ้านายยังไม่ได้สอนสกิลอะไรหนูเลยค่ะ**\nลองส่งคำสั่งที่อยากให้หนูจำไว้ทำเป็นประจำมาสิคะ!');
+        let text = "🛠️ **คลังสกิลของเจ้านายที่หนูจำได้:**\n━━━━━━━━━━━━━━━━━━━━\n";
         snap.forEach(doc => text += `🔹 **${doc.id}**: ${doc.data().description}\n`);
         ctx.reply(text);
     });
 
     bot.hears('🆔 My ID', (ctx) => {
-        ctx.reply(`🆔 **ID ของเจ้านายคือ:**\n\n\`${ctx.from.id}\`\n\nนำไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard นะครับ!`);
+        ctx.reply(`🆔 **ID ของเจ้านายคือ:**\n\n\`${ctx.from.id}\`\n\nเอาไปใส่ในหน้า Dashboard เพื่อซิงค์ข้อมูลกันนะคะ!`);
     });
 
     bot.hears('📅 Dashboard', (ctx) => {
-        ctx.reply(`🌐 **เข้าสู่หน้า Dashboard**\n\nจัดการนัดหมาย, ดูรันไทม์ และระบบเมมโมรี่ได้ทางเว็บเลยครับ:`, Markup.inlineKeyboard([
+        ctx.reply(`🌐 **เข้าสู่หน้า Dashboard**\n\nไปดูภาพรวมนัดหมายและตั้งค่าระบบได้ที่นี่เลยนะคะเจ้านาย:`, Markup.inlineKeyboard([
             [Markup.button.url('Open Dashboard', 'https://stacy-ai.vercel.app')]
         ]));
     });
@@ -707,17 +707,17 @@ if (bot) {
     });
     bot.command('skills', async (ctx) => {
         const snap = await db.collection('userActivities').doc(String(ctx.from.id)).collection('skills').get();
-        if (snap.empty) return ctx.reply('🛠️ **ยังไม่มีสกิลที่ติดตั้งครับ**');
-        let text = "🛠️ **คลังสกิลของคุณ:**\n";
+        if (snap.empty) return ctx.reply('🛠️ **ยังไม่มีสกิลที่จำไว้เลยค่ะเจ้านาย**');
+        let text = "🛠️ **คลังสกิลที่หนูจำได้:**\n";
         snap.forEach(doc => text += `🔹 **${doc.id}**: ${doc.data().description}\n`);
         ctx.reply(text);
     });
     bot.command('whoami', async (ctx) => {
         const memory = await getBotMemory(ctx.from.id);
-        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n"${memory.identity}"`);
+        ctx.reply(`🧠 **ตัวตนปัจจุบันของหนู:**\n"${memory.identity}"`);
     });
     bot.command('myid', (ctx) => {
-        ctx.reply(`🆔 **ID ของเจ้านายคือ:** \`${ctx.from.id}\``);
+        ctx.reply(`🆔 **ID ของเจ้านายคือ:** \`${ctx.from.id}\` นะคะ`);
     });
 
 
