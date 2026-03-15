@@ -1413,3 +1413,81 @@ button {
   border-radius: 9px;
   color: var(--text-1)
 }
+
+/* ===== Calendar Styles ===== */
+.modal-lg { width: 500px !important; }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 8px;
+  margin-top: 10px;
+}
+.cal-day {
+  aspect-ratio: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: .85rem;
+  color: var(--text-2);
+  cursor: pointer;
+  transition: all .1s var(--ease);
+  position: relative;
+}
+.cal-day.head {
+  background: transparent;
+  border: none;
+  font-weight: 600;
+  color: var(--text-3);
+  cursor: default;
+}
+.cal-day.empty { visibility: hidden; }
+.cal-day:hover:not(.head):not(.empty) {
+  background: var(--bg-3);
+  border-color: var(--accent);
+  color: var(--text-1);
+}
+.cal-day.today {
+  border-color: var(--accent);
+  background: var(--accent-dim);
+  color: var(--text-1);
+  font-weight: 700;
+}
+.cal-dot {
+  width: 5px;
+  height: 5px;
+  background: var(--accent);
+  border-radius: 50%;
+  position: absolute;
+  bottom: 8px;
+}
+.task-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.task-card {
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px;
+  display: grid;
+  grid-template-columns: 60px 1fr 80px;
+  align-items: center;
+  gap: 12px;
+}
+.task-time { font-family: 'JetBrains Mono', monospace; font-size: .75rem; color: var(--accent); }
+.task-title { font-size: .88rem; font-weight: 500; color: var(--text-1); }
+.task-status {
+  font-size: .65rem;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-align: center;
+  font-weight: 700;
+}
+.task-status.synced { background: rgba(74, 222, 128, .1); color: var(--green); }
+.task-status.pending { background: rgba(251, 191, 36, .1); color: var(--yellow); }

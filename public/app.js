@@ -38,6 +38,10 @@ function renderShell() {
       <header class="topbar">
         <span class="topbar-t">Qwen Agent</span>
         <div class="topbar-spacer"></div>
+        <button class="topbar-sched" id="openCalendar" title="Calendar events">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          <span>Calendar</span>
+        </button>
         <button class="topbar-sched" id="openSched" title="Scheduled tasks">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
           <span id="schedCount">Schedule</span>
@@ -141,6 +145,31 @@ function renderShell() {
     </div>
   </div>
 
+  <div class="modal-bg" id="calendarModal">
+    <div class="modal modal-lg">
+      <div class="modal-top">
+        <h2 id="calMonthTitle">📅 Calendar</h2>
+        <div style="display:flex; gap:8px">
+          <button class="ibtn" id="calPrev">◀</button>
+          <button class="ibtn" id="calNext">▶</button>
+          <button class="ibtn" id="closeCalendar">✕</button>
+        </div>
+      </div>
+      <div class="modal-bd">
+        <div class="cal-grid" id="calGrid"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="taskModal">
+    <div class="modal">
+      <div class="modal-top"><h2 id="taskDateTitle">Tasks</h2><button class="ibtn" id="closeTask">✕</button></div>
+      <div class="modal-bd">
+        <div class="task-list" id="taskList"></div>
+      </div>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>`;
 
   renderSuggestions();
@@ -201,6 +230,14 @@ function bindAll() {
   $('closeSched').addEventListener('click', () => $('schedModal').classList.remove('vis'));
   $('schedModal').addEventListener('click', e => { if (e.target.id === 'schedModal') $('schedModal').classList.remove('vis'); });
   $('schedAdd').addEventListener('click', addSchedule);
+
+  // Calendar
+  $('openCalendar').addEventListener('click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
+  $('closeCalendar').addEventListener('click', () => $('calendarModal').classList.remove('vis'));
+  $('calPrev').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); });
+  $('calNext').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); });
+  $('calendarModal').addEventListener('click', e => { if (e.target.id === 'calendarModal') $('calendarModal').classList.remove('vis'); });
+  $('closeTask').addEventListener('click', () => $('taskModal').classList.remove('vis'));
 
   // Artifact
   $('artClose').addEventListener('click', closeArt);
@@ -530,8 +567,81 @@ function updateSchedCount() {
   const active = S.schedules.filter(s => s.active).length;
   const el = document.getElementById('schedCount');
   const btn = document.getElementById('openSched');
-  el.textContent = active > 0 ? `${active} task${active > 1 ? 's' : ''}` : 'Schedule';
-  btn.classList.toggle('has', active > 0);
+  if (el) el.textContent = active > 0 ? `${active} task${active > 1 ? 's' : ''}` : 'Schedule';
+  if (btn) btn.classList.toggle('has', active > 0);
+}
+
+// ===== Calendar Logic =====
+let currentMonth = new Date();
+let taskCache = [];
+
+async function fetchTasks() {
+    try {
+        // Fetch from the general user (me) or specifically for this demo
+        const snap = await db.collection('userActivities').doc('me').collection('tasks').get();
+        taskCache = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) { console.error('Tasks fetch error:', e); }
+}
+
+async function renderCalendar() {
+  await fetchTasks();
+  const grid = document.getElementById('calGrid');
+  const monthTitle = document.getElementById('calMonthTitle');
+  grid.innerHTML = '';
+
+  const year = currentMonth.getFullYear();
+  const month = currentMonth.getMonth();
+  monthTitle.textContent = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(currentMonth);
+
+  const firstDay = new Date(year, month, 1).getDay();
+  const lastDate = new Date(year, month + 1, 0).getDate();
+
+  // Weekdays
+  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
+    const el = document.createElement('div'); el.className = 'cal-day head'; el.textContent = d; grid.appendChild(el);
+  });
+
+  // Empty days
+  for (let i = 0; i < firstDay; i++) {
+    const el = document.createElement('div'); el.className = 'cal-day empty'; grid.appendChild(el);
+  }
+
+  const today = new Date();
+  for (let d = 1; d <= lastDate; d++) {
+    const el = document.createElement('div');
+    el.className = 'cal-day';
+    if (d === today.getDate() && month === today.getMonth() && year === today.getFullYear()) el.classList.add('today');
+    
+    // Check for tasks on this day
+    const dayTasks = taskCache.filter(t => {
+        if (!t.time) return false;
+        const tDate = new Date(t.time);
+        return tDate.getDate() === d && tDate.getMonth() === month && tDate.getFullYear() === year;
+    });
+
+    el.innerHTML = `<span>${d}</span>`;
+    if (dayTasks.length > 0) {
+        const dot = document.createElement('div'); dot.className = 'cal-dot'; el.appendChild(dot);
+        el.classList.add('has-task');
+    }
+
+    el.onclick = () => showTasksForDay(d, dayTasks);
+    grid.appendChild(el);
+  }
+}
+
+function showTasksForDay(day, tasks) {
+    if (tasks.length === 0) return;
+    document.getElementById('taskModal').classList.add('vis');
+    document.getElementById('taskDateTitle').textContent = `Tasks for ${day} ${document.getElementById('calMonthTitle').textContent}`;
+    const list = document.getElementById('taskList');
+    list.innerHTML = tasks.map(t => `
+        <div class="task-card">
+            <div class="task-time">${new Date(t.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+            <div class="task-title">${esc(t.title)}</div>
+            <div class="task-status ${t.status}">${t.status}</div>
+        </div>
+    `).join('');
 }
 
 // ===== Title Generation =====
