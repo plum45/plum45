@@ -79,15 +79,16 @@ const tgContexts = new Map(); // Store conversation history
 // ========== Core Logic Pillars & Actions ==========
 
 async function getBotMemory(userId) {
-    if (!db) return { facts: [], identity: "Stacy (เลขาขี้เล่น)" };
+    if (!db) return { facts: [], identity: "Stacy (เลขาขี้เล่น)", calendarConnected: false };
     try {
         const doc = await db.collection('userActivities').doc(String(userId)).get();
         const data = doc.exists ? doc.data() : {};
         return {
             facts: data.facts || [],
-            identity: data.identity || "Stacy (เลขาขี้เล่น)"
+            identity: data.identity || "Stacy (เลขาขี้เล่น)",
+            calendarConnected: !!data.calendarWebhookUrl
         };
-    } catch (e) { return { facts: [], identity: "Stacy (เลขาขี้เล่น)" }; }
+    } catch (e) { return { facts: [], identity: "Stacy (เลขาขี้เล่น)", calendarConnected: false }; }
 }
 
 // Utility: Save and Sync functions are defined below for architectural clarity.
@@ -611,7 +612,9 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
         8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
         9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
-        10. **CALENDAR RULE**: ทุกครั้งที่ใช้ SAVE_TASK หรือ ADD_CALENDAR_EVENT ต้องส่งค่า "time" เป็นรูปแบบ **ISO 8601 (YYYY-MM-DDTHH:mm:00)** เท่านั้น เพื่อให้ระบบ Dashboard แสดงผลได้ถูกต้อง และนัดหมายจะไปปรากฏที่หน้าปฏิทินทันทีครับ`;
+        10. **CALENDAR RULE**: ทุกครั้งที่ใช้ SAVE_TASK หรือ ADD_CALENDAR_EVENT ต้องส่งค่า "time" เป็น ISO 8601 (YYYY-MM-DDTHH:mm:00) 
+        11. **CREATIVE TITLING**: เจ้านายอยากได้ความเก๋! เมื่อบันทึกนัดหมาย ให้ตั้งชื่อ (title) ให้พรีเมียมและน่าสนใจ (เช่น "Dinner" -> "🍽️ Gastronomy Night") แต่ยังสื่อถึงเรื่องเดิม
+        12. **CONNECTION STATUS**: ระบบ Google Calendar เชื่อมต่อ "พร้อมใช้งาน" แล้ว (${memory.calendarConnected ? '🟢 Connected' : '🔴 Hidden URL - Ask User if sync fails'}) ไม่ต้องบอกเจ้านายว่ายังไม่เชื่อมต่ออีก`;
 
 
 
