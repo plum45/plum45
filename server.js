@@ -285,18 +285,39 @@ if (bot) {
 
     bot.on('document', async (ctx) => {
         const doc = ctx.message.document;
+        const userId = ctx.from.id;
         try {
+            await ctx.sendChatAction('typing');
             const link = await ctx.telegram.getFileLink(doc.file_id);
-            const res = await axios.get(link.href, { responseType: 'arraybuffer' });
+            const res = await axios.get(link.href, { 
+                responseType: 'arraybuffer',
+                timeout: 30000 // Increase timeout for large PDFs
+            });
+            
             let content = "";
-            if (doc.mime_type === 'application/pdf') {
-                const data = await pdf(Buffer.from(res.data));
-                content = data.text;
-            } else {
-                content = Buffer.from(res.data).toString('utf8');
+            let parseSuccess = false;
+            
+            try {
+                if (doc.mime_type === 'application/pdf') {
+                    const data = await pdf(Buffer.from(res.data));
+                    content = data.text;
+                    parseSuccess = true;
+                } else {
+                    content = Buffer.from(res.data).toString('utf8');
+                    parseSuccess = true;
+                }
+            } catch (parseErr) {
+                console.error('PDF Parse Error:', parseErr);
             }
-            await processStacyAI(ctx, ctx.message.caption || "", content.substring(0, 5000));
-        } catch (e) { ctx.reply('❌ อ่านไฟล์ไม่สำเร็จครับ'); }
+
+            const fileNameContext = `[FILE RECEIVED: ${doc.file_name}]`;
+            const finalContext = parseSuccess ? `${fileNameContext}\n${content.substring(0, 7000)}` : `${fileNameContext} (หมายเหตุ: ไฟล์นี้อ่านเนื้อหาข้างในไม่สำเร็จ แต่อาจเดาบริบทจากชื่อไฟล์ได้ครับ)`;
+            
+            await processStacyAI(ctx, ctx.message.caption || "", finalContext);
+        } catch (e) {
+            console.error('Global Document Error:', e);
+            ctx.reply(`❌ ขออภัยครับเจ้านาย ผมพยายามดึงไฟล์ "${doc.file_name}" แล้วแต่เกิดขัดข้องที่ระบบการรับส่งไฟล์ครับ`);
+        }
     });
 
     bot.on('text', async (ctx) => {
