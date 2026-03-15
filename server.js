@@ -203,7 +203,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                 
                 if (webhookUrl) {
                     try {
-                        await axios.post(webhookUrl, { ...data, time: parsedTime });
+                        await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description });
                         await ctx.reply(`📅 บันทึกและซิงค์กับ Google Calendar แล้ว: "${eventData.title}"`);
                     } catch (e) {
                         await ctx.reply(`⚠️ บันทึกในระบบแล้ว แต่ซิงค์ภายนอกล้มเหลว: ${e.message}`);
