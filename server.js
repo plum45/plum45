@@ -8,6 +8,7 @@ const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const pdf = require('pdf-parse');
 const cheerio = require('cheerio');
+const google = require('googlethis');
 
 // ========== Configuration & Environment ==========
 const PORT = process.env.PORT || 10000;
@@ -185,6 +186,23 @@ async function handleAgentActions(ctx, action, data, userId) {
             await userRef.set({ identity: data.roleDescription }, { merge: true });
             await ctx.reply(`🧠 รับทราบครับ! ผมได้บันทึกตัวตนใหม่ของผมแล้ว: **"${data.roleDescription}"**\nผมจะจำสิ่งนี้ไว้ตลอดไปและปรับการทำงานให้ตรงตามบทบาทนี้ครับ`);
             break;
+        case 'WEB_SEARCH':
+            try {
+                const results = await performSearch(data.query);
+                await ctx.reply(`🔍 เจ้านายครับ ผมไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วครับ:\n\n${results.substring(0, 1000)}...`);
+            } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จ: ${err.message}`); }
+            break;
+    }
+}
+
+async function performSearch(query) {
+    try {
+        const options = { page: 0, safe: false, parse_ads: false, additional_params: { hl: 'th' } };
+        const response = await google.search(query, options);
+        return response.results.map(r => `• ${r.title}: ${r.description}`).join('\n');
+    } catch (e) {
+        console.error('Search Error:', e);
+        return "ไม่สามารถดึงข้อมูลจากอินเทอร์เน็ตได้ในขณะนี้";
     }
 }
 
@@ -229,10 +247,12 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}
         - IMAGE_GEN {"prompt": "..."}
         - CREATE_SKILL {"name": "...", "description": "...", "schema": {...}, "instructions": "..."}
-        - SET_IDENTITY {"roleDescription": "คำอธิบายตัวตนหรือบทบาทถาวรของคุณ"}
+        - SET_IDENTITY {"roleDescription": "..."}
+        - WEB_SEARCH {"query": "สิ่งที่ต้องการค้นหาในอินเทอร์เน็ต"}
 
         [REASONING GUIDELINES]:
-        - หากพากผู้ใช้สั่งให้คุณทำหน้าที่เป็นอะไร (เช่น เรขา, ครู, หมอ) ให้ใช้ SET_IDENTITY เพื่อบันทึกบทบาทนั้นถาวร
+        - หากเจ้านายถามเรื่องที่คุณไม่รู้ หรือต้องการข้อมูลล่าสุด (เช่น ข่าว, ราคาสินค้า, ความรู้ทั่วไป) ให้ใช้ WEB_SEARCH ทันที
+        - คุณสามารถอ่านและเรียนรู้จากโลกอินเทอร์เน็ตได้ตลอดเวลาเพื่อให้ฉลาดขึ้นตามคำสั่งเจ้านาย
         - เมื่อได้รับไฟล์ (PDF/Text) ให้วิเคราะห์ตามบทบาทที่คุณเป็นอยู่`;
 
         const response = await axios.post(NVIDIA_API_URL, {
