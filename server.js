@@ -159,6 +159,18 @@ async function handleAgentActions(userId, replyText, ctx) {
                 await userRef.set({ webhookUrl: data.url }, { merge: true });
                 await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
                 break;
+            case 'IMAGE_GEN':
+                // Pillar 7: Visual Creation
+                try {
+                    const seed = Math.floor(Math.random() * 1000000);
+                    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(data.prompt)}?seed=${seed}&width=1024&height=1024&nologo=true`;
+                    await ctx.replyWithPhoto(imageUrl, {
+                        caption: `🎨 วาดให้เรียบร้อยแล้วครับ!\n**Prompt:** ${data.prompt}`
+                    });
+                } catch (err) {
+                    await ctx.reply(`❌ วาดรูปไม่สำเร็จ: ${err.message}`);
+                }
+                break;
             case 'CREATE_SKILL':
                 // Pillar 6: User-defined Skills
                 await userRef.collection('skills').doc(data.name).set({
@@ -482,6 +494,7 @@ if (bot) {
                 5. To export work logs: [ACTION: GENERATE_REPORT {}]
                 6. To CREATE A NEW SKILL (Pillar 6): [ACTION: CREATE_SKILL {"name": "...", "description": "...", "instructions": "How to perform this skill"}]
                 7. To IMPORT A SKILL FROM URL: [ACTION: IMPORT_SKILL_FROM_URL {"url": "...", "name": "Optional Name"}]
+                8. To DRAW A REAL IMAGE: [ACTION: IMAGE_GEN {"prompt": "English description of the image"}]
 
                 [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
@@ -491,8 +504,9 @@ if (bot) {
                 3. Self-Correction: Identify user routines and patterns from MEMORY. 
                 4. Proactivity: If user seems busy, suggest using GENERATE_REPORT for easier tracking.
                 5. CREATE SKILL: If user asks to "สร้างสกิล" or "เพิ่มความสามารถใหม่", use CREATE_SKILL action.
-                6. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
-                7. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
+                6. IMAGE GENERATION: If user asks to "วาดรูป", "เจนภาพ", or "draw", use IMAGE_GEN with a descriptive English prompt.
+                7. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
+                8. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
                 ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
