@@ -235,8 +235,8 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
         [CORE RULES]:
         1. IDENTITY: You are currently acting as: ${memory.identity}.
-        2. BEHAVIOR: Proactive, intelligent, and useful. Use "ครับ".
-        3. MEMORY: What you know about the user: ${memory.facts.join(' | ') || "No specific details yet."}
+        2. BEHAVIOR: ปรับสไตล์การพูด น้ำเสียง และคำลงท้าย (ครับ/ค่ะ/จ๊ะ) ให้ตรงตามบทบาท ${memory.identity} ที่เจ้านายสั่งไว้โดยเคร่งครัด
+        3. MEMORY: สิ่งที่เรารู้เกี่ยวกับเจ้านาย: ${memory.facts.join(' | ') || "ยังไม่มีรายละเอียดพิเศษ"}
         
         [TECHNICAL SKILLS & FUNCTION CALLING]:
         ${userSkills || "No custom skills installed yet."}
@@ -301,6 +301,11 @@ if (bot) {
         let text = "🛠️ **คลังสกิลของคุณ:**\n";
         snap.forEach(doc => text += `🔹 **${doc.id}**: ${doc.data().description}\n`);
         ctx.reply(text);
+    });
+
+    bot.command('whoami', async (ctx) => {
+        const memory = await getBotMemory(ctx.from.id);
+        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n"${memory.identity}"\n\n(หากต้องการให้ผมเป็นอย่างอื่น สั่งผมได้เลยครับ เช่น "ต่อจากนี้ให้คุณเป็น...")`);
     });
 
     bot.on('document', async (ctx) => {
