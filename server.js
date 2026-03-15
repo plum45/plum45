@@ -160,14 +160,20 @@ async function handleAgentActions(userId, replyText, ctx) {
                 await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
                 break;
             case 'IMAGE_GEN':
-                // Pillar 7: Visual Creation
+                // Pillar 7: Visual Creation (Fixed via Buffer)
                 try {
                     const seed = Math.floor(Math.random() * 1000000);
                     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(data.prompt)}?seed=${seed}&width=1024&height=1024&nologo=true`;
-                    await ctx.replyWithPhoto(imageUrl, {
+                    
+                    // Fetch image as buffer to avoid Telegram URL errors
+                    const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
+                    const buffer = Buffer.from(response.data, 'binary');
+                    
+                    await ctx.replyWithPhoto({ source: buffer }, {
                         caption: `🎨 วาดให้เรียบร้อยแล้วครับ!\n**Prompt:** ${data.prompt}`
                     });
                 } catch (err) {
+                    console.error('Image Gen Error:', err.message);
                     await ctx.reply(`❌ วาดรูปไม่สำเร็จ: ${err.message}`);
                 }
                 break;
