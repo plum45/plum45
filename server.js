@@ -153,17 +153,15 @@ async function handleAgentActions(ctx, action, data, userId) {
             });
             await ctx.reply(`📝 บันทึกกิจกรรมให้แล้วครับ: ${data.note}`);
             break;
+        case 'SYNC_USER':
+            // Automatically handled by syncUser middleware now, but kept for explicit calls
+            break;
         case 'ADD_CALENDAR_EVENT':
             const userDoc = await userRef.get();
-            const webhookUrl = userDoc.exists ? userDoc.data().webhookUrl : null;
+            const userData = userDoc.data();
+            const webhookUrl = userData?.calendarWebhookUrl;
+
             if (webhookUrl) {
-                // Dual sync: Save internally + send to webhook
-                await userRef.collection('tasks').add({
-                    title: data.title,
-                    time: data.startTime,
-                    status: 'synced',
-                    createdAt: admin.firestore.FieldValue.serverTimestamp()
-                });
                 await axios.post(webhookUrl, data);
                 await ctx.reply(`📅 ลงนัดหมายและซิงค์กับ Google Calendar เรียบร้อย: "${data.title}"`);
             } else {
@@ -171,59 +169,57 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         case 'IMAGE_GEN':
-            // Pillar 7: Ultra-Robust Visual Creation (Decisive Fix)
-            const loadingMsg = await ctx.reply('🎨 Stacy กำลังใช้สมาธิวาดรูปให้อยู่นะครับเจ้านาย... (อาจใช้เวลา 20-40 วินาที)');
+            // Pillar 7: The "No-Failure" Visual Protocol (OpenClaw delivery style)
+            const loadingMsg = await ctx.reply('🎨 Stacy กำลังรังสรรค์รูปภาพให้ครับเจ้านาย... (อาจใช้เวลา 15-45 วินาที)');
             try {
                 const rawPrompt = data.prompt || "highly detailed masterpiece";
-                // Aggressive cleaning for API compatibility
                 const cleanPrompt = rawPrompt.replace(/[^\w\s]/gi, '').substring(0, 300) || "digital art";
                 const seed = Math.floor(Math.random() * 1000000);
                 
-                // Model Priority: Flux -> Turbo -> Standard
                 const models = ['flux', 'turbo', 'any'];
                 let success = false;
                 let buffer = null;
+                let lastError = "";
 
+                // Strategy: Internal fetch only. Do NOT trust Telegram's fetch for redirecting/slow APIs.
                 for (const model of models) {
                     try {
                         const targetUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true`;
-                        console.log(`🖼️ Attempting with model [${model}]: ${targetUrl}`);
+                        console.log(`🖼️ Stacy Fetch [${model}]: ${targetUrl}`);
                         
                         const response = await axios.get(targetUrl, { 
                             responseType: 'arraybuffer',
-                            timeout: 60000,
+                            timeout: 55000, 
                             headers: { 'User-Agent': 'Mozilla/5.0' }
                         });
                         
-                        if (response.data && response.data.length > 5000) { // Check if it's a valid image
+                        if (response.data && response.data.length > 3000) {
                             buffer = Buffer.from(response.data);
                             success = true;
                             break;
                         }
                     } catch (e) {
-                        console.warn(`⚠️ Model [${model}] failed: ${e.message}`);
+                        lastError = e.message;
+                        console.warn(`⚠️ IMAGE_GEN Step Failed [${model}]: ${e.message}`);
                     }
                 }
 
+                const caption = `✨ วาดเสร็จแล้วครับ!\n📌 คำสั่ง: ${cleanPrompt}`;
                 if (success && buffer) {
-                    const caption = `✨ วาดเสร็จแล้วครับ! (ใช้โมเดลระดับสูง)\n📌 คำสั่ง: ${cleanPrompt}`;
-                    // OpenClaw-inspired: High-Res delivery if requested or by default for quality
                     if (data.highRes) {
-                        await ctx.replyWithDocument({ source: buffer, filename: `${cleanPrompt.slice(0,20)}.png` }, { caption });
+                        await ctx.replyWithDocument({ source: buffer, filename: `stacy_art_${seed}.png` }, { caption });
                     } else {
                         await ctx.replyWithPhoto({ source: buffer }, { caption });
                     }
                 } else {
-                    // Final Fallback: Direct URL for Telegram to handle
-                    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?seed=${seed}`;
-                    console.log(`🚀 Last Resort: Passing URL to Telegram: ${fallbackUrl}`);
-                    await ctx.replyWithPhoto(fallbackUrl, { 
-                        caption: `✨ วาดเสร็จแล้วครับ! (ส่งผ่านระบบสำรอง)\n📌 คำสั่ง: ${cleanPrompt}` 
-                    });
+                    // FINAL FAILSAFE: Instead of passing URL to Telegram (which fails with 400), 
+                    // we give the user a direct clickable link to the image.
+                    const finalLink = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?seed=${seed}&model=flux`;
+                    await ctx.reply(`⚠️ ระบบเบื้องหลังขัดข้องเล็กน้อยครับ (Error: ${lastError})\n\nเจ้านายสามารถกดดูรูปที่ผมวาดไว้ที่นี่ได้เลยครับ:\n🔗 ${finalLink}`);
                 }
             } catch (err) {
-                console.error('❌ IMAGE_GEN Fatal Error:', err.message);
-                ctx.reply(`❌ ขออภัยครับเจ้านาย ผมพยายมวาดเต็มที่แล้วแต่ระบบขัดข้อง: ${err.message}`);
+                console.error('❌ IMAGE_GEN Fatal:', err.message);
+                ctx.reply(`❌ ขออภัยครับเจ้านาย ผมหาทางวาดให้จนสุดทางแล้วแต่ไม่ได้จริงๆ: ${err.message}`);
             } finally {
                 await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
             }
@@ -268,7 +264,45 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await ctx.reply(`🔍 เจ้านายครับ ผมไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วครับ:\n\n${results.substring(0, 1000)}...`);
             } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จ: ${err.message}`); }
             break;
+        case 'SEARCH_MEMORIES':
+            try {
+                const snap = await userRef.collection('history').orderBy('timestamp', 'desc').limit(10).get();
+                const past = snap.docs.map(doc => `[Past] User: ${doc.data().user} | Bot: ${doc.data().bot}`).join('\n');
+                await ctx.reply(`🧠 ย้อนความจำให้แล้วครับ จากประวัติล่าสุด:\n\n${past || "ยังไม่มีประวัติการคุยครับ"}`);
+            } catch (err) { ctx.reply(`❌ ดึงความจำไม่สำเร็จ: ${err.message}`); }
+            break;
     }
+}
+
+
+async function saveBotMemory(userId, userMsg, botReply) {
+    if (!db) return;
+    try {
+        const userRef = db.collection('userActivities').doc(String(userId));
+        await userRef.collection('history').add({
+            user: userMsg,
+            bot: botReply,
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+        if (userMsg.includes('ฉันชื่อ') || userMsg.includes('ผมชื่อ')) {
+            const name = userMsg.split('ชื่อ')[1].trim().split(' ')[0];
+            await userRef.set({ facts: admin.firestore.FieldValue.arrayUnion(`เจ้านายชื่อ: ${name}`) }, { merge: true });
+        }
+    } catch (e) { console.error('Save Memory Error:', e); }
+}
+
+async function syncUser(ctx) {
+    if (!db || !ctx.from) return;
+    try {
+        const userRef = db.collection('userActivities').doc(String(ctx.from.id));
+        await userRef.set({
+            firstName: ctx.from.first_name || '',
+            lastName: ctx.from.last_name || '',
+            username: ctx.from.username || '',
+            lastActive: admin.firestore.FieldValue.serverTimestamp(),
+            tgId: String(ctx.from.id)
+        }, { merge: true });
+    } catch (e) { console.error('Sync User Error:', e); }
 }
 
 async function performSearch(query) {
@@ -326,8 +360,10 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - [ACTION: CREATE_SKILL {"name": "...", "description": "...", "schema": {}, "instructions": "..."}]
         - [ACTION: SET_IDENTITY {"roleDescription": "..."}]
         - [ACTION: WEB_SEARCH {"query": "..."}]
+        - [ACTION: SEARCH_MEMORIES {}]
 
         [REASONING GUIDELINES]:
+        - หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว หรือบอกให้ "เรียนรู้เพิ่ม" ให้ใช้ [ACTION: SEARCH_MEMORIES] เพื่อดูประวัติการคุยเก่าๆ
         - หากเจ้านายสั่งให้ "วาดรูป" หรือ "เจนภาพ" ให้ใช้ [ACTION: IMAGE_GEN]. หากต้องการภาพแบบไฟล์ไม่ลดคุณภาพ ให้ใส่ "highRes": true
         - ก่อนตัดสินใจใช้ SKILL ให้ดูเงื่อนไข "Routing" (Preferred/Avoid) ที่ระบุไว้ในแต่ละสกิล
         - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
@@ -357,6 +393,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
         userStore.history.push({ role: 'user', content: finalInput }, { role: 'assistant', content: reply });
         if (userStore.history.length > 20) userStore.history.splice(0, 2);
+        
         saveBotMemory(userId, finalInput, reply);
         
     } catch (e) {
@@ -386,6 +423,11 @@ if (bot) {
         const memory = await getBotMemory(ctx.from.id);
         ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n"${memory.identity}"\n\n(หากต้องการให้ผมเป็นอย่างอื่น สั่งผมได้เลยครับ เช่น "ต่อจากนี้ให้คุณเป็น...")`);
     });
+
+    bot.command('myid', (ctx) => {
+        ctx.reply(`🆔 **ID ของเจ้านายคือ:** \`${ctx.from.id}\`\n\nนำเลขนี้ไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard เพื่อดูปฏิทินและข้อมูลอื่นๆ นะครับ!`);
+    });
+
 
     bot.on('document', async (ctx) => {
         const doc = ctx.message.document;
@@ -425,7 +467,32 @@ if (bot) {
     });
 
     bot.on('text', async (ctx) => {
-        await processStacyAI(ctx, ctx.message.text);
+        const userId = ctx.from.id;
+        const userMsg = ctx.message.text;
+        await syncUser(ctx); // Auto sync ID to Firestore
+        
+        // Keep context
+        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
+        const userStore = tgContexts.get(userId);
+        
+        await processStacyAI(ctx, userMsg);
+    });
+
+    bot.on('photo', async (ctx) => {
+        const userId = ctx.from.id;
+        await syncUser(ctx);
+        const photo = ctx.message.photo.pop();
+        const fileId = photo.file_id;
+        const fileUrl = await ctx.telegram.getFileLink(fileId);
+        
+        // Use Gemini-style vision or just acknowledge
+        const caption = ctx.message.caption || "";
+        await ctx.reply('📷 ผมได้รับรูปภาพแล้วครับ กำลังวิเคราะห์ข้อมูลให้นะครับ...');
+        
+        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
+        const userStore = tgContexts.get(userId);
+        
+        await processStacyAI(ctx, `[เจ้านายส่งรูปภาพมา] ${caption}`, fileUrl.href);
     });
 }
 
