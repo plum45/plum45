@@ -149,44 +149,56 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         case 'IMAGE_GEN':
-            // Pillar 7: Master Fix (Dual-Layer Fallback Approach)
-            const loadingMsg = await ctx.reply('🎨 กำลังรังสรรค์รูปภาพให้เด็ดขาดตามสั่งครับเจ้านาย... (อาจใช้เวลาประมาณ 10-20 วินาที)');
+            // Pillar 7: Ultra-Robust Visual Creation (Decisive Fix)
+            const loadingMsg = await ctx.reply('🎨 Stacy กำลังใช้สมาธิวาดรูปให้อยู่นะครับเจ้านาย... (อาจใช้เวลา 20-40 วินาที)');
             try {
-                // Ensure prompt is English-only for maximum compatibility with Pollinations API
-                const rawPrompt = data.prompt || "stunning visual";
-                const cleanPrompt = rawPrompt.replace(/[^\x00-\x7F]/g, "").substring(0, 400) || "modern digital art";
+                const rawPrompt = data.prompt || "highly detailed masterpiece";
+                // Aggressive cleaning for API compatibility
+                const cleanPrompt = rawPrompt.replace(/[^\w\s]/gi, '').substring(0, 300) || "digital art";
                 const seed = Math.floor(Math.random() * 1000000);
                 
-                // Using the most stable API endpoint
-                const targetUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&nologo=true`;
-                
-                console.log(`🖼️ Final Attempting Image: ${targetUrl}`);
+                // Model Priority: Flux -> Turbo -> Standard
+                const models = ['flux', 'turbo', 'any'];
+                let success = false;
+                let buffer = null;
 
-                try {
-                    // Layer 1: Internal Buffer Fetch (Fastest)
-                    const response = await axios.get(targetUrl, { 
-                        responseType: 'arraybuffer',
-                        timeout: 50000,
-                        headers: { 
-                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                for (const model of models) {
+                    try {
+                        const targetUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true`;
+                        console.log(`🖼️ Attempting with model [${model}]: ${targetUrl}`);
+                        
+                        const response = await axios.get(targetUrl, { 
+                            responseType: 'arraybuffer',
+                            timeout: 60000,
+                            headers: { 'User-Agent': 'Mozilla/5.0' }
+                        });
+                        
+                        if (response.data && response.data.length > 5000) { // Check if it's a valid image
+                            buffer = Buffer.from(response.data);
+                            success = true;
+                            break;
                         }
+                    } catch (e) {
+                        console.warn(`⚠️ Model [${model}] failed: ${e.message}`);
+                    }
+                }
+
+                if (success && buffer) {
+                    await ctx.replyWithPhoto({ source: buffer }, { 
+                        caption: `✨ วาดเสร็จแล้วครับ! (ใช้โมเดลระดับสูง)\n📌 คำสั่ง: ${cleanPrompt}` 
                     });
-                    
-                    await ctx.replyWithPhoto({ source: Buffer.from(response.data) }, { 
-                        caption: `✨ วาดเสร็จแล้วครับเจ้านาย! (แบบ High-Res)\n📌 Prompt: ${cleanPrompt}` 
+                } else {
+                    // Final Fallback: Direct URL for Telegram to handle
+                    const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?seed=${seed}`;
+                    console.log(`🚀 Last Resort: Passing URL to Telegram: ${fallbackUrl}`);
+                    await ctx.replyWithPhoto(fallbackUrl, { 
+                        caption: `✨ วาดเสร็จแล้วครับ! (ส่งผ่านระบบสำรอง)\n📌 คำสั่ง: ${cleanPrompt}` 
                     });
-                    await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
-                } catch (fetchErr) {
-                    console.warn('⚠️ Buffer fetch failed, using Direct URL Fallback...', fetchErr.message);
-                    // Layer 2: Direct URL Fallback (Most Reliable if Layer 1 fails)
-                    await ctx.replyWithPhoto(targetUrl, { 
-                        caption: `✨ วาดเสร็จแล้วครับเจ้านาย! (ส่งผ่านลิงก์สำรองเนื่องจากเซิร์ฟเวอร์หลักหนาแน่น)\n📌 Prompt: ${cleanPrompt}` 
-                    });
-                    await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
                 }
             } catch (err) {
                 console.error('❌ IMAGE_GEN Fatal Error:', err.message);
-                ctx.reply(`❌ ขออภัยครับเจ้านาย ระบบวาดรูปขัดข้องรุนแรง: ${err.message}`);
+                ctx.reply(`❌ ขออภัยครับเจ้านาย ผมพยายมวาดเต็มที่แล้วแต่ระบบขัดข้อง: ${err.message}`);
+            } finally {
                 await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
             }
             break;
