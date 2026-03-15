@@ -1,4 +1,6 @@
+require('dotenv').config();
 const express = require('express');
+
 const bodyParser = require('body-parser');
 const axios = require('axios');
 const cors = require('cors');
@@ -13,6 +15,8 @@ const { exec } = require('child_process');
 const screenshot = require('screenshot-desktop');
 const si = require('systeminformation');
 const cron = require('node-cron');
+const puppeteer = require('puppeteer');
+
 
 
 // ========== Configuration & Environment ==========
@@ -269,7 +273,13 @@ async function handleAgentActions(ctx, action, data, userId) {
             break;
         case 'EXECUTE_COMMAND':
             // Pillar 8: Terminal Authority (Personal Agent Mode)
+            const lowCmd = data.command.toLowerCase();
+            if (lowCmd.includes('screenshot') || lowCmd.includes('screencapture')) {
+                await ctx.reply('⚠️ ตรวจพบว่าคุณพยายามใช้คำสั่ง Shell เพื่อแคปจอ ผมจะเปลี่ยนมาใช้ระบบ Internal Capture ที่เสถียรกว่าให้แทนครับ...');
+                return handleAgentActions(ctx, 'SCREEN_CAPTURE', {}, userId);
+            }
             await ctx.reply(`💻 กำลังรันคำสั่ง: \`${data.command}\``);
+
             exec(data.command, { timeout: 30000 }, async (error, stdout, stderr) => {
                 const output = stdout || stderr || "(ไม่มีข้อมูลส่งกลับ)";
                 await logToTerminal(userId, data.command, output);
@@ -307,7 +317,55 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await logToTerminal(userId, 'MORNING_BRIEF', 'Morning briefing delivered');
             } catch (err) { ctx.reply(`❌ Morning Brief ไม่สำเร็จ: ${err.message}`); }
             break;
+        case 'WEB_BROWSE':
+            // { query?: "...", url?: "...", selector?: "..." }
+            try {
+                await ctx.reply('🌐 กำลังเปิดเบราว์เซอร์เพื่อเข้าถึงข้อมูลและแคปหน้าจอให้ครับ...');
+                const browser = await puppeteer.launch({ 
+                    headless: "new",
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+                });
+                const page = await browser.newPage();
+                await page.setViewport({ width: 1280, height: 800 });
+                
+                let targetUrl = data.url;
+                if (!targetUrl && data.query) {
+                    const searchRes = await google.search(data.query);
+                    if (searchRes.results && searchRes.results.length > 0) {
+                        targetUrl = searchRes.results[0].url;
+                    }
+                }
+
+                if (!targetUrl) throw new Error("ไม่พบ URL หรือคำค้นหาที่ถูกต้อง");
+
+                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+                
+                const screenshotPath = path.join(__dirname, `web_capture_${Date.now()}.png`);
+                if (data.selector) {
+                    const element = await page.$(data.selector);
+                    if (element) {
+                        await element.screenshot({ path: screenshotPath });
+                    } else {
+                        await page.screenshot({ path: screenshotPath });
+                    }
+                } else {
+                    await page.screenshot({ path: screenshotPath });
+                }
+
+                await ctx.replyWithPhoto({ source: screenshotPath }, { 
+                    caption: `🌐 แคปภาพจาก: ${targetUrl}\n${data.selector ? `🎯 ส่วนที่เลือก: ${data.selector}` : ''}` 
+                });
+                
+                await browser.close();
+                if (fs.existsSync(screenshotPath)) fs.unlinkSync(screenshotPath);
+                await logToTerminal(userId, 'WEB_BROWSE', `Captured site: ${targetUrl}`);
+            } catch (err) {
+                ctx.reply(`❌ ภารกิจเบราว์เซอร์ล้มเหลว: ${err.message}`);
+                console.error(err);
+            }
+            break;
         case 'READ_FILE':
+
 
             try {
                 const content = fs.readFileSync(data.path, 'utf8');
@@ -417,17 +475,21 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - [ACTION: SCREEN_CAPTURE {}]
         - [ACTION: GET_PC_STATS {}]
         - [ACTION: MORNING_BRIEF {"interests": "..."}]
+        - [ACTION: WEB_BROWSE {"query": "...", "url": "...", "selector": "..."}]
 
         [REASONING GUIDELINES]:
-        - หากเจ้านายสั่ง "แคปจอ", "ถ่ายรูปหน้าจอ" ให้ใช้ [ACTION: SCREEN_CAPTURE]
-        - หากเจ้านายสั่ง "ขอดูสเปก", "เช็คแรม", "สเตตัสคอม" ให้ใช้ [ACTION: GET_PC_STATS]
-        - หากเจ้านายต้องการสรุปช่วงเช้า หรือ "Morning Brief" ให้ใช้ [ACTION: MORNING_BRIEF]
-        - หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม", "เช็คไฟล์" หรือ "รันโค้ด" ให้ใช้ [ACTION: EXECUTE_COMMAND]. (ระวังคำสั่งที่อันตราย!)
-        - หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE] พร้อมระบุ Path ให้ถูกต้อง
+        1. **IMPORTANT**: หากเจ้านายสั่ง "แคปจอ", "ถ่ายรูปหน้าจอ" **ห้าม** ใช้ EXECUTE_COMMAND เด็ดขาด! ให้ใช้ [ACTION: SCREEN_CAPTURE {}] เท่านั้น
+        2. **WEB NAVIGATION SELECTION**: 
+           - หากเจ้านายสั่ง "ค้นหาข้อมูล...", "อ่านข่าว...", "หาคำตอบเกี่ยวกับ...", "สรุปเนื้อหาจากเว็บ..." (ต้องการแค่ข้อมูลตัวอักษร) -> ให้ใช้ [ACTION: WEB_SEARCH {"query": "..."}] เพราะทำงานได้รวดเร็วกว่า
+           - หากเจ้านายสั่ง "ไปที่หน้าเว็บ...", "แคปจอเว็บ...", "ดูราคาหุ้นบนเว็บ...", "ขอดูรูปหน้าเว็บ..." (ต้องการเห็นภาพ) -> ให้ใช้ [ACTION: WEB_BROWSE {"query": "...", "url": "...", "selector": "..."}] เพื่อเปิดเบราว์เซอร์จริงและถ่ายภาพส่งให้
+        3. หากเจ้านายสั่ง "ขอดูสเปก", "เช็คแรม", "สเตตัสคอม" **ห้าม** ใช้ EXECUTE_COMMAND เด็ดขาด! ให้ใช้ [ACTION: GET_PC_STATS {}] เท่านั้น
+        4. หากเจ้านายต้องการสรุปช่วงเช้า หรือ "Morning Brief" ให้ใช้ [ACTION: MORNING_BRIEF {"interests": "..."}]
+        5. หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม" หรือ "เช็คไฟล์" ให้ใช้ [ACTION: EXECUTE_COMMAND {"command": "..."}]
+        6. หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE {"path": "..."}]
+        7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
+        8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
+        9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)`;
 
-        - หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES]
-        - หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN]
-        - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)`;
 
         const response = await axios.post(NVIDIA_API_URL, {
             model: 'moonshotai/kimi-k2-instruct',
