@@ -79,15 +79,15 @@ const tgContexts = new Map(); // Store conversation history
 // ========== Core Logic Pillars & Actions ==========
 
 async function getBotMemory(userId) {
-    if (!db) return { facts: [], identity: "Stacy AI Agent" };
+    if (!db) return { facts: [], identity: "Stacy (เลขาขี้เล่น)" };
     try {
         const doc = await db.collection('userActivities').doc(String(userId)).get();
         const data = doc.exists ? doc.data() : {};
         return {
             facts: data.facts || [],
-            identity: data.identity || "Stacy AI Agent"
+            identity: data.identity || "Stacy (เลขาขี้เล่น)"
         };
-    } catch (e) { return { facts: [], identity: "Stacy AI Agent" }; }
+    } catch (e) { return { facts: [], identity: "Stacy (เลขาขี้เล่น)" }; }
 }
 
 // Utility: Save and Sync functions are defined below for architectural clarity.

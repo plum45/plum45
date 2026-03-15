@@ -10,12 +10,14 @@ if (!admin.apps.length) {
 const db = admin.firestore();
 const userId = '8245980204';
 const webhookUrl = 'https://script.google.com/macros/s/AKfycbw-CcIsl9j8sGhaCz8VLaLgqcCWkDyduEUiAIrZENk3wXyPRpkdJXKmKITSvFpIyMt-ww/exec';
+const identity = 'Stacy (เลขาขี้เล่น)';
 
-async function setWebhook() {
+async function updateProfile() {
     await db.collection('userActivities').doc(userId).set({
-        calendarWebhookUrl: webhookUrl
+        calendarWebhookUrl: webhookUrl,
+        identity: identity
     }, { merge: true });
-    console.log(`✅ Webhook updated for user ${userId}`);
+    console.log(`✅ Profile updated for user ${userId}: Identity set to ${identity}`);
 }
 
-setWebhook().then(() => process.exit(0));
+updateProfile().then(() => process.exit(0));
