@@ -95,14 +95,17 @@ async function saveBotMemory(userId, userMsg, botReply) {
 
 function extractActions(text) {
     const actions = [];
-    const regex = /\[ACTION: (\w+) ({.*?})\]/g;
+    // More robust regex to catch actions even with multiline JSON or varied spacing
+    const regex = /\[ACTION:\s*(\w+)\s*({[\s\S]*?})\]/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
         try {
             actions.push({ type: match[1], data: JSON.parse(match[2]) });
-        } catch (e) { console.error('Action Parse Error:', e); }
+        } catch (e) { 
+            console.error('Action Parse Error:', e, 'Raw JSON:', match[2]); 
+        }
     }
-    const cleanText = text.replace(/\[ACTION:.*?\]/g, '').trim();
+    const cleanText = text.replace(/\[ACTION:[\s\S]*?\]/g, '').trim();
     return { cleanText, actions };
 }
 
@@ -242,17 +245,19 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         ${userSkills || "No custom skills installed yet."}
 
         [ACTION CAPABILITIES]:
-        - SAVE_TASK {"title": "...", "time": "..."}
-        - WORK_LOG {"note": "...", "type": "..."}
-        - ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}
-        - IMAGE_GEN {"prompt": "..."}
-        - CREATE_SKILL {"name": "...", "description": "...", "schema": {...}, "instructions": "..."}
-        - SET_IDENTITY {"roleDescription": "..."}
-        - WEB_SEARCH {"query": "สิ่งที่ต้องการค้นหาในอินเทอร์เน็ต"}
+        คุณต้องใช้รูปแบบนี้ท้ายข้อความเสมอเพื่อสั่งงาน:
+        - [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
+        - [ACTION: WORK_LOG {"note": "...", "type": "..."}]
+        - [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}]
+        - [ACTION: IMAGE_GEN {"prompt": "English descriptive prompt"}]
+        - [ACTION: CREATE_SKILL {"name": "...", "description": "...", "schema": {}, "instructions": "..."}]
+        - [ACTION: SET_IDENTITY {"roleDescription": "..."}]
+        - [ACTION: WEB_SEARCH {"query": "..."}]
 
         [REASONING GUIDELINES]:
-        - หากเจ้านายถามเรื่องที่คุณไม่รู้ หรือต้องการข้อมูลล่าสุด (เช่น ข่าว, ราคาสินค้า, ความรู้ทั่วไป) ให้ใช้ WEB_SEARCH ทันที
-        - คุณสามารถอ่านและเรียนรู้จากโลกอินเทอร์เน็ตได้ตลอดเวลาเพื่อให้ฉลาดขึ้นตามคำสั่งเจ้านาย
+        - หากเจ้านายสั่งให้ "วาดรูป" หรือ "เจนภาพ" คุณต้องใช้ [ACTION: IMAGE_GEN] เท่านั้น
+        - ในฟิลด์ prompt ของ IMAGE_GEN ให้เขียนบรรยายภาพเป็นภาษาอังกฤษที่ละเอียดเพื่อให้ได้ภาพที่สวยงาม
+        - หากเจ้านายถามเรื่องที่คุณไม่รู้ ให้ใช้ WEB_SEARCH ทันที
         - เมื่อได้รับไฟล์ (PDF/Text) ให้วิเคราะห์ตามบทบาทที่คุณเป็นอยู่`;
 
         const response = await axios.post(NVIDIA_API_URL, {
