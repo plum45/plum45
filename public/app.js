@@ -637,13 +637,14 @@ let taskCache = [];
 async function fetchTasks() {
     try {
         const id = (S.settings.tgId || '').trim() || 'me';
-        console.log(`📅 Fetching tasks for ID: ${id}`);
-        const snap = await db.collection('userActivities').doc(id).collection('tasks').orderBy('createdAt', 'desc').limit(200).get();
+        console.log(`📅 [Debug] Fetching tasks for ID: ${id}`);
+        // Removed orderBy to avoid index requirement for new users
+        const snap = await db.collection('userActivities').doc(id).collection('tasks').limit(500).get();
         taskCache = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`✅ Loaded ${taskCache.length} tasks`);
+        console.log(`✅ [Debug] Loaded ${taskCache.length} tasks:`, taskCache);
         updateSyncStatus(true);
     } catch (e) { 
-        console.error('Tasks fetch error:', e); 
+        console.error('❌ [Critical] Tasks fetch error:', e); 
         updateSyncStatus(false);
     }
 }
@@ -722,7 +723,8 @@ async function renderCalendar() {
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
-  monthTitle.textContent = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(currentMonth);
+  const idStr = (S.settings.tgId || '').trim() || 'none';
+  monthTitle.innerHTML = `<span>${new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(currentMonth)}</span><br><small style="font-size:0.6rem; color:var(--accent); font-weight:400;">Syncing ID: ${idStr} (${taskCache.length} tasks)</small>`;
 
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
