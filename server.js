@@ -467,7 +467,12 @@ async function performSearch(query) {
 
 async function processStacyAI(ctx, userMsg, fileContext = null) {
     const userId = ctx.from.id;
-    const now = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    // Enhanced Time Context for Calendar Accuracy
+    const d = new Date();
+    const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+    const now = d.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const dayName = days[d.getDay()];
+    const timeFull = `วัน${dayName}ที่ ${now} (พ.ศ. ${d.getFullYear() + 543})`;
     
     try {
         await ctx.sendChatAction('typing');
@@ -489,7 +494,10 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const finalInput = fileContext ? `[FILE CONTENT]: ${fileContext}\n\n[USER MESSAGE]: ${userMsg || "Please process this file."}` : userMsg;
 
         const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
-        [CURRENT_TIME]: ${now} (Asia/Bangkok)
+        [STATUS]: ออนไลน์
+        [CURRENT_TIME]: ${timeFull} 
+        
+        [IMPORTANT]: เวลาตอบเรื่องวัน/เวลา ให้ดู [CURRENT_TIME] และคำนวณวันในสัปดาห์ให้ถูกต้อน (ห้ามมั่ววันอังคาร/วันพุธ)
 
         [CORE RULES]:
 
@@ -625,31 +633,46 @@ if (bot) {
     bot.on('text', async (ctx) => {
         const userId = ctx.from.id;
         const userMsg = ctx.message.text;
-        await syncUser(ctx); // Auto sync ID to Firestore
-        
-        // Keep context
-        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
-        const userStore = tgContexts.get(userId);
-        
-        await processStacyAI(ctx, userMsg);
+        try {
+            await ctx.sendChatAction('typing');
+            await syncUser(ctx);
+            if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
+            await processStacyAI(ctx, userMsg);
+        } catch (e) {
+            console.error('Text Error:', e);
+            ctx.reply('❌ ระบบประมวลผลข้อความขัดข้อง รบกวนลองใหม่อีกครั้งครับ');
+        }
     });
 
     bot.on('photo', async (ctx) => {
         const userId = ctx.from.id;
-        await syncUser(ctx);
-        const photo = ctx.message.photo.pop();
-        const fileId = photo.file_id;
-        const fileUrl = await ctx.telegram.getFileLink(fileId);
-        
-        // Use Gemini-style vision or just acknowledge
-        const caption = ctx.message.caption || "";
-        await ctx.reply('📷 ผมได้รับรูปภาพแล้วครับ กำลังวิเคราะห์ข้อมูลให้นะครับ...');
-        
-        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
-        const userStore = tgContexts.get(userId);
-        
-        await processStacyAI(ctx, `[เจ้านายส่งรูปภาพมา] ${caption}`, fileUrl.href);
+        try {
+            await ctx.sendChatAction('typing');
+            await syncUser(ctx);
+            const photo = ctx.message.photo.pop();
+            const fileId = photo.file_id;
+            const fileUrl = await ctx.telegram.getFileLink(fileId);
+            
+            const caption = ctx.message.caption || "";
+            await ctx.reply('📸 ได้รับรูปภาพแล้วครับ! กำลังพยายามทำความเข้าใจภาพและบริบทที่เจ้านายส่งมานะครับ...');
+            
+            if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
+            await processStacyAI(ctx, `[เจ้านายส่งรูปภาพมา] ${caption}`, fileUrl.href);
+        } catch (e) {
+            console.error('Photo Error:', e);
+            ctx.reply('❌ ไม่สามารถดึงข้อมูลรูปภาพเพื่อวิเคราะห์ได้ครับ');
+        }
     });
+
+
+    bot.catch((err, ctx) => {
+        console.error(`🔥 Telegram Global Error [${ctx.updateType}]:`, err);
+        ctx.reply('🔴 เกิดข้อผิดพลาดร้ายแรงที่ระบบบอทครับ ผมกำลังแจ้งเตือนทีมวิศวกร (หรือเจ้านาย) ให้ตรวจสอบให้ครับ');
+    });
+
+    bot.launch()
+        .then(() => console.log("🤖 Bot Polling Started (Local)"))
+        .catch(err => console.error("❌ Bot Launch Failed:", err));
 }
 
 // ========== Web Server Routes ==========
