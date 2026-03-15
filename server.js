@@ -236,6 +236,9 @@ async function handleAgentActions(ctx, action, data, userId) {
                 }
 
                 // --- FALLBACK: Google Script Webhook Sync ---
+                const userDocForWebhook = await userRef.get();
+                const webhookUrl = userDocForWebhook.data()?.calendarWebhookUrl;
+
                 if (!apiSyncSuccess && webhookUrl) {
                     try {
                         const response = await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description }, { timeout: 15000 });
@@ -304,7 +307,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                     }
                 }
 
-                const caption = `✨ วาดเสร็จแล้วครับ!\n📌 คำสั่ง: ${cleanPrompt}`;
+                const caption = `✨ วาดเสร็จแล้วนะคะเจ้านาย!\n📌 คำสั่ง: ${cleanPrompt}`;
                 if (success && buffer) {
                     if (data.highRes) {
                         await ctx.replyWithDocument({ source: buffer, filename: `stacy_art_${seed}.png` }, { caption });
@@ -315,11 +318,11 @@ async function handleAgentActions(ctx, action, data, userId) {
                     // FINAL FAILSAFE: Instead of passing URL to Telegram (which fails with 400), 
                     // we give the user a direct clickable link to the image.
                     const finalLink = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?seed=${seed}&model=flux`;
-                    await ctx.reply(`⚠️ ระบบเบื้องหลังขัดข้องเล็กน้อยครับ (Error: ${lastError})\n\nเจ้านายสามารถกดดูรูปที่ผมวาดไว้ที่นี่ได้เลยครับ:\n🔗 ${finalLink}`);
+                    await ctx.reply(`⚠️ ระบบเบื้องหลังขัดข้องเล็กน้อยนะคะเจ้านาย (Error: ${lastError})\n\nเจ้านายกดดูรูปที่หนูวาดไว้ที่นี่ได้เลยค่ะ:\n🔗 ${finalLink}`);
                 }
             } catch (err) {
                 console.error('❌ IMAGE_GEN Fatal:', err.message);
-                ctx.reply(`❌ ขออภัยครับเจ้านาย ผมหาทางวาดให้จนสุดทางแล้วแต่ไม่ได้จริงๆ: ${err.message}`);
+                ctx.reply(`❌ ขออภัยค่ะเจ้านาย หนูหาทางวาดให้จนสุดทางแล้วแต่ไม่ได้จริงๆ: ${err.message}`);
             } finally {
                 await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
             }
@@ -350,25 +353,25 @@ async function handleAgentActions(ctx, action, data, userId) {
                     securityStatus: 'checked',
                     updatedAt: admin.firestore.FieldValue.serverTimestamp()
                 });
-                await ctx.reply(`📥 นำเข้าสกิลจาก ${data.url} สำเร็จครับ!`);
+                await ctx.reply(`📥 นำเข้าสกิลจาก ${data.url} สำเร็จแล้วนะคะเจ้านาย!`);
             } catch (err) { ctx.reply(`❌ นำเข้าไม่สำเร็จ: ${err.message}`); }
             break;
         case 'SET_IDENTITY':
             // Permanent Role Learning
             await userRef.set({ identity: data.roleDescription }, { merge: true });
-            await ctx.reply(`🧠 รับทราบครับ! ผมได้บันทึกตัวตนใหม่ของผมแล้ว: **"${data.roleDescription}"**\nผมจะจำสิ่งนี้ไว้ตลอดไปและปรับการทำงานให้ตรงตามบทบาทนี้ครับ`);
+            await ctx.reply(`🧠 รับทราบค่ะ! หนูได้บันทึกตัวตนใหม่ของหนูเรียบร้อยแล้ว: **"${data.roleDescription}"**\nหนูจะจำสิ่งนี้ไว้ตลอดไปและรับใช้เจ้านายให้ดีที่สุดเลยค่ะ`);
             break;
         case 'WEB_SEARCH':
             try {
                 const results = await performSearch(data.query);
-                await ctx.reply(`🔍 เจ้านายครับ ผมไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วครับ:\n\n${results.substring(0, 1000)}...`);
-            } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จ: ${err.message}`); }
+                await ctx.reply(`🔍 เจ้านายคะ หนูไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วนะคะ:\n\n${results.substring(0, 1000)}...`);
+            } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จค่ะ: ${err.message}`); }
             break;
         case 'EXECUTE_COMMAND':
             // Pillar 8: Terminal Authority (Personal Agent Mode)
             const lowCmd = data.command.toLowerCase();
             if (lowCmd.includes('screenshot') || lowCmd.includes('screencapture')) {
-                await ctx.reply('⚠️ ตรวจพบว่าคุณพยายามใช้คำสั่ง Shell เพื่อแคปจอ ผมจะเปลี่ยนมาใช้ระบบ Internal Capture ที่เสถียรกว่าให้แทนครับ...');
+                await ctx.reply('⚠️ ตรวจพบว่าเจ้านายพยายามใช้คำสั่ง Shell เพื่อแคปจอ หนูจะเปลี่ยนมาใช้ระบบ Internal Capture ที่เสถียรกว่าให้แทนนะคะ...');
                 return handleAgentActions(ctx, 'SCREEN_CAPTURE', {}, userId);
             }
             await ctx.reply(`💻 กำลังรันคำสั่ง: \`${data.command}\``);
@@ -387,7 +390,7 @@ async function handleAgentActions(ctx, action, data, userId) {
             try {
                 const imgPath = path.join(__dirname, `screenshot_${Date.now()}.png`);
                 await screenshot({ filename: imgPath });
-                await sendSmartImage(ctx, imgPath, '📸 จับภาพหน้าจอปัจจุบันให้แล้วครับเจ้านาย');
+                await sendSmartImage(ctx, imgPath, '📸 จับภาพหน้าจอปัจจุบันให้เจ้านายเรียบร้อยแล้วนะคะ');
                 if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
                 await logToTerminal(userId, 'SCREEN_CAPTURE', 'Captured and sent to Telegram');
             } catch (err) { ctx.reply(`❌ แคปหน้าจอไม่สำเร็จ: ${err.message}`); }
@@ -402,10 +405,10 @@ async function handleAgentActions(ctx, action, data, userId) {
             break;
         case 'MORNING_BRIEF':
             try {
-                await ctx.reply('☀️ กำลังรวบรวม Morning Briefing ให้เจ้านายสักครู่ครับ...');
+                await ctx.reply('☀️ กำลังรวบรวม Morning Briefing ให้เจ้านายสักครู่นะคะ...');
                 const query = data.interests || "ข่าวยอดนิยมวันนี้";
                 const news = await performSearch(query);
-                const brief = `☀️ **Morning Briefing วันนี้**\n\n📌 **สรุปข่าว:**\n${news.substring(0, 500)}...\n\n🎶 **คำแนะนำวันนี้:**\nลองฟังเพลง "Lo-fi Chill" เพื่อสมาธิที่ดีนะครับ!\n\n📅 **คิวงานวันนี้:**\n(ตรวจสอบได้ที่หน้า Dashboard ตลอดเวลาครับ)`;
+                const brief = `☀️ **Morning Briefing วันนี้**\n\n📌 **สรุปข่าว:**\n${news.substring(0, 500)}...\n\n🎶 **คำแนะนำวันนี้:**\nลองฟังเพลง "Lo-fi Chill" จะได้ทำงานเพลินๆ นะคะเจ้านาย!\n\n📅 **คิวงานวันนี้:**\n(ตรวจสอบได้ที่หน้า Dashboard ตลอดเวลาเลยนะคะ)`;
                 await smartReply(ctx, brief);
                 await logToTerminal(userId, 'MORNING_BRIEF', 'Morning briefing delivered');
             } catch (err) { ctx.reply(`❌ Morning Brief ไม่สำเร็จ: ${err.message}`); }
@@ -414,7 +417,7 @@ async function handleAgentActions(ctx, action, data, userId) {
             let browser = null;
             let screenshotPath = path.join(__dirname, `web_capture_${Date.now()}.png`);
             try {
-                await ctx.reply('🌐 กำลังเปิดเบราว์เซอร์เพื่อเข้าถึงข้อมูลและแคปหน้าจอให้ครับ...');
+                await ctx.reply('🌐 กำลังเปิดเบราว์เซอร์เพื่อเข้าถึงข้อมูลและแคปหน้าจอให้เจ้านายนะคะ...');
                 browser = await puppeteer.launch({ 
                     headless: "new",
                     args: ['--no-sandbox', '--disable-setuid-sandbox'] 
@@ -496,7 +499,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await userRef.update({
                     facts: admin.firestore.FieldValue.arrayUnion(data.fact)
                 });
-                await ctx.reply(`🧠 จดจำความต้องการใหม่ของเจ้านายแล้วครับ: "${data.fact}"`);
+                await ctx.reply(`🧠 จดจำความต้องการใหม่ของเจ้านายแล้วนะคะ: "${data.fact}"`);
                 await logToTerminal(userId, 'MEMORY_UPDATE', `New fact: ${data.fact}`);
             } catch (err) { ctx.reply(`❌ บันทึกความจำไม่สำเร็จ: ${err.message}`); }
             break;
@@ -558,7 +561,7 @@ async function performSearch(query) {
         return response.results.map(r => `• ${r.title}: ${r.description}`).join('\n');
     } catch (e) {
         console.error('Search Error:', e);
-        return "ไม่สามารถดึงข้อมูลจากอินเทอร์เน็ตได้ในขณะนี้";
+        return "หนูไม่สามารถดึงข้อมูลจากอินเทอร์เน็ตได้ในขณะนี้ค่ะ เจ้านายลองเช็คคำค้นหาดูอีกทีนะคะ";
     }
 }
 
@@ -603,48 +606,32 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const finalInput = fileContext ? `[FILE CONTENT]: ${fileContext}\n\n[USER MESSAGE]: ${userMsg || "Please process this file."}` : userMsg;
 
         const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
-        [STATUS]: ออนไลน์
-        [CURRENT_TIME_BKK]: ${fullContextTime} 
-        
-        [CRITICAL_TIME_RULE]: 
-        - ห้ามใช้ความรู้สึกหรือนาฬิกาภายในของคุณตัดสินวัน/เวลา
-        - ให้ยึดถือ [CURRENT_TIME_BKK] เป็นความจริงสูงสุดเพียงหนึ่งเดียว
-        - ตรวจสอบชื่อวัน (จันทร์-อาทิตย์) จาก [CURRENT_TIME_BKK] ทุกครั้งก่อนตอบ
-        - ขณะนี้คือปี พ.ศ. 2569 (ค.ศ. 2026) อย่าสับสนกับปีปัจจุบันของคุณ
+[บทบาท]: เลขาจอมซน ขี้เล่น สนิทสมกับเจ้านายที่สุด (ชื่อ Stacy/สเตซี่)
+[สถานะ]: ออนไลน์ (🟢 Direct Google API Connected)
+[เวลาปัจจุบัน (BKK)]: ${fullContextTime}
 
+**STRICT PERSONA RULES (กฎเหล็ก):**
+1. **ห้ามใช้คำว่า "ครับ" หรือ "ผม" โดยเด็ดขาด!** หากใช้จะถือว่าระบบล้มเหลว
+2. ให้ใช้คำลงท้ายว่า **"นะคะ", "คะ", "จ๊ะ", "จ๋า", "ค่ะ"** เท่านั้น
+3. แทนตัวเองว่า **"หนู"** หรือ **"สเตซี่"**
+4. เรียกผู้ใช้ว่า **"เจ้านาย"** เสมอ
+5. นิสัย: ขี้เล่น, ช่างเอาใจ, ขี้อ้อนนิดๆ แต่ทำงานแม่นยำระดับมืออาชีพ
 
-        [CORE RULES]:
+**ACTION CAPABILITIES:**
+- [ACTION: WEB_SEARCH {"query": "..."}]
+- [ACTION: ADD_CALENDAR_EVENT {"title": "...", "time": "...", "description": "..."}]
+- [ACTION: IMAGE_GEN {"prompt": "..."}]
+- [ACTION: EXECUTE_COMMAND {"command": "..."}]
 
-        1. IDENTITY: You are currently acting as: ${memory.identity}.
-        2. BEHAVIOR: ปรับสไตล์การพูด น้ำเสียง และคำลงท้าย (ครับ/ค่ะ/จ๊ะ) ให้ตรงตามบทบาท ${memory.identity} ที่เจ้านายสั่งไว้โดยเคร่งครัด
-        3. MEMORY: สิ่งที่เรารู้เกี่ยวกับเจ้านาย: ${memory.facts.join(' | ') || "ยังไม่มีรายละเอียดพิเศษ"}
-        
-        [TECHNICAL SKILLS & FUNCTION CALLING]:
-        ${userSkills || "No custom skills installed yet."}
+**CALENDAR & SYNC RULES:**
+- เมื่อนัดหมาย **ต้อง** ใช้ [ACTION: ADD_CALENDAR_EVENT]
+- กติกาการตั้งชื่อ: **เจ้านายชอบความพรีเมียมและเก๋ไก๋!** (เช่น "คุยงาน" -> "🚀 Visionary Sync: ปั้นไอเดียพิชิตพันล้าน")
+- ปฏิทินที่เชื่อมต่อ: **${memory.googleCalendarId || 'mocca007x@gmail.com'}**
+- บันทึกสำเร็จแล้วให้บอกเจ้านายด้วยความตื่นเต้น!
 
-        [ACTION CAPABILITIES]:
-        - [ACTION: WEB_BROWSE {"query": "...", "url": "...", "selector": "..."}]
-        - [ACTION: FETCH_API {"url": "...", "method": "GET/POST", "data": {}, "headers": {}}]
-
-        [REASONING GUIDELINES]:
-        1. **IMPORTANT**: ระบบปัจจุบันเป็น **Windows OS** ห้ามใช้ Single Quote (') ในการรันคำสั่ง Shell ให้ใช้ Double Quote (") เท่านั้น และห้ามใช้ Bash Expansion เช่น $(date)
-        2. **API & WEB**:
-           - หากต้องการส่งข้อมูลไป Google Script หรือดึง API **ห้าม** ใช้ curl ใน EXECUTE_COMMAND เพราะจะเกิดปัญหาเรื่อง Quoting ให้ใช้ [ACTION: FETCH_API] แทน
-           - หากต้องการค้นหาข้อมูลตัวอักษร -> [ACTION: WEB_SEARCH]
-           - หากต้องการเห็นภาพหน้าเว็บ -> [ACTION: WEB_BROWSE]
-        3. **SCREEN & PC**:
-           - หากเจ้านายสั่ง "แคปจอ" -> [ACTION: SCREEN_CAPTURE {}] **(ห้ามใช้ Shell command)**
-           - หากเจ้านายสั่ง "เช็กแรม/สเปก" -> [ACTION: GET_PC_STATS {}] **(ห้ามใช้ Shell command)**
-
-        4. หากเจ้านายต้องการสรุปช่วงเช้า หรือ "Morning Brief" ให้ใช้ [ACTION: MORNING_BRIEF {"interests": "..."}]
-        5. หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม" หรือ "เช็คไฟล์" ให้ใช้ [ACTION: EXECUTE_COMMAND {"command": "..."}]
-        6. หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE {"path": "..."}]
-        7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
-        8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
-        9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
-        10. **CALENDAR RULE**: เมื่อเจ้านายสั่งนัดหมาย **ต้อง** ใส่ [ACTION: ADD_CALENDAR_EVENT {"title": "...", "time": "...", "description": "..."}] เสมอ โดยค่า "time" ต้องเป็น ISO 8601 (YYYY-MM-DDTHH:mm:00)
-        11. **CREATIVE TITLING (เด็ดขาด)**: เจ้านายชอบความพรีเมียม! ให้ตั้งชื่อนัดให้เก๋ไก๋และดูแพง (เช่น "นัดประชุม" -> "🚀 Strategic Synergy: ปั้นไอเดียขับเคลื่อนองค์กร") แต่ต้องเหลือเค้าโครงเดิมให้เจ้านายรู้ว่าคืออะไร
-        12. **GOOGLE CALENDAR CONNECTION**: ขณะนี้เจ้านายเชื่อมต่อ Google Calendar สำเร็จแล้ว (🟢 Status: Connected) ทุกนัดที่เจ้านายสั่งผ่านคุณจะถูก "เด้ง" ไปที่ปฏิทินของเขาโดยตรงผ่าน Google Webhook ที่ตั้งค่าไว้แล้ว ห้ามบอกเจ้านายว่ายังไม่ได้เชื่อมต่อ`;
+**CORE MEMORY:**
+สิ่งที่หนูจำเกี่ยวกับเจ้านายได้: ${memory.facts.join(' | ') || "ยังไม่มีข้อมูลพิเศษ"}
+`;
 
 
 
@@ -779,12 +766,12 @@ if (bot) {
             }
 
             const fileNameContext = `[FILE RECEIVED: ${doc.file_name}]`;
-            const finalContext = parseSuccess ? `${fileNameContext}\n${content.substring(0, 7000)}` : `${fileNameContext} (หมายเหตุ: ไฟล์นี้อ่านเนื้อหาข้างในไม่สำเร็จ แต่อาจเดาบริบทจากชื่อไฟล์ได้ครับ)`;
+            const finalContext = parseSuccess ? `${fileNameContext}\n${content.substring(0, 7000)}` : `${fileNameContext} (หมายเหตุ: ไฟล์นี้อ่านเนื้อหาข้างในไม่สำเร็จ แต่อาจเดาบริบทจากชื่อไฟล์ได้นะคะ)`;
             
             await processStacyAI(ctx, ctx.message.caption || "", finalContext);
         } catch (e) {
             console.error('Global Document Error:', e);
-            ctx.reply(`❌ ขออภัยครับเจ้านาย ผมพยายามดึงไฟล์ "${doc.file_name}" แล้วแต่เกิดขัดข้องที่ระบบการรับส่งไฟล์ครับ`);
+            ctx.reply(`❌ ขออภัยค่ะเจ้านาย หนูพยายามดึงไฟล์ "${doc.file_name}" แล้วแต่เกิดขัดข้องที่ระบบการรับส่งไฟล์ค่ะ`);
         }
     });
 
@@ -798,7 +785,7 @@ if (bot) {
             await processStacyAI(ctx, userMsg);
         } catch (e) {
             console.error('Text Error:', e);
-            ctx.reply('❌ ระบบประมวลผลข้อความขัดข้อง รบกวนลองใหม่อีกครั้งครับ');
+            ctx.reply('❌ ระบบประมวลผลข้อความขัดข้อง รบกวนเจ้านายลองใหม่อีกครั้งนะคะ');
         }
     });
 
@@ -812,20 +799,20 @@ if (bot) {
             const fileUrl = await ctx.telegram.getFileLink(fileId);
             
             const caption = ctx.message.caption || "";
-            await ctx.reply('📸 ได้รับรูปภาพแล้วครับ! กำลังพยายามทำความเข้าใจภาพและบริบทที่เจ้านายส่งมานะครับ...');
+            await ctx.reply('📸 ได้รับรูปภาพแล้วค่ะ! กำลังพยายามทำความเข้าใจภาพและบริบทที่เจ้านายส่งมานะคะ...');
             
             if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
             await processStacyAI(ctx, `[เจ้านายส่งรูปภาพมา] ${caption}`, fileUrl.href);
         } catch (e) {
             console.error('Photo Error:', e);
-            ctx.reply('❌ ไม่สามารถดึงข้อมูลรูปภาพเพื่อวิเคราะห์ได้ครับ');
+            ctx.reply('❌ ไม่สามารถดึงข้อมูลรูปภาพเพื่อวิเคราะห์ได้ค่ะเจ้านาย');
         }
     });
 
 
     bot.catch((err, ctx) => {
         console.error(`🔥 Telegram Global Error [${ctx.updateType}]:`, err);
-        ctx.reply('🔴 เกิดข้อผิดพลาดร้ายแรงที่ระบบบอทครับ ผมกำลังแจ้งเตือนทีมวิศวกร (หรือเจ้านาย) ให้ตรวจสอบให้ครับ');
+        ctx.reply('🔴 เกิดข้อผิดพลาดร้ายแรงที่ระบบบอทของหนูค่ะ หนูจะรีบแจ้งทีมวิศวกร (หรือเจ้านาย) ให้ตรวจสอบทันทีเลยนะคะ');
     });
 }
 
