@@ -267,7 +267,11 @@ function bindAll() {
   $('sTemp').addEventListener('input', e => { S.settings.temp = +e.target.value; $('vTemp').textContent = S.settings.temp.toFixed(2); save(); });
   $('sTopP').addEventListener('input', e => { S.settings.topP = +e.target.value; $('vTopP').textContent = S.settings.topP.toFixed(2); save(); });
   $('sMax').addEventListener('input', e => { S.settings.maxTok = +e.target.value; $('vMax').textContent = S.settings.maxTok; save(); });
-  $('sTgId').addEventListener('input', e => { S.settings.tgId = e.target.value; save(); });
+  $('sTgId').addEventListener('input', e => { 
+    S.settings.tgId = e.target.value; 
+    save(); 
+    fetchTasks(); // Real-time sync attempt
+  });
 
   // Scheduler
   $('openSched').addEventListener('click', () => { $('schedModal').classList.add('vis'); renderSchedList(); });
@@ -632,10 +636,27 @@ let taskCache = [];
 
 async function fetchTasks() {
     try {
-        const id = S.settings.tgId || 'me';
-        const snap = await db.collection('userActivities').doc(id).collection('tasks').orderBy('createdAt', 'desc').get();
+        const id = (S.settings.tgId || '').trim() || 'me';
+        console.log(`📅 Fetching tasks for ID: ${id}`);
+        const snap = await db.collection('userActivities').doc(id).collection('tasks').orderBy('createdAt', 'desc').limit(200).get();
         taskCache = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-    } catch (e) { console.error('Tasks fetch error:', e); }
+        console.log(`✅ Loaded ${taskCache.length} tasks`);
+        updateSyncStatus(true);
+    } catch (e) { 
+        console.error('Tasks fetch error:', e); 
+        updateSyncStatus(false);
+    }
+}
+
+function updateSyncStatus(ok) {
+    const el = document.getElementById('sysStatus');
+    if (el) {
+        if (!S.settings.tgId || S.settings.tgId === 'me') {
+            el.innerHTML = '⚠️ <span style="color:#ffa500">ID Not Set (Local Only)</span>';
+        } else {
+            el.innerHTML = ok ? '✅ <span style="color:#4ade80">Synced with Telegram</span>' : '❌ <span style="color:#f87171">Sync Error</span>';
+        }
+    }
 }
 
 // ===== Skills Logic =====
@@ -725,8 +746,12 @@ async function renderCalendar() {
     // Check for tasks on this day
     const dayTasks = taskCache.filter(t => {
         if (!t.time) return false;
-        const tDate = new Date(t.time);
-        return tDate.getDate() === d && tDate.getMonth() === month && tDate.getFullYear() === year;
+        try {
+            const tDate = new Date(t.time);
+            if (isNaN(tDate.getTime())) return false;
+            // Normalize to local date for comparison
+            return tDate.getDate() === d && tDate.getMonth() === month && tDate.getFullYear() === year;
+        } catch (err) { return false; }
     });
 
     el.innerHTML = `<span>${d}</span>`;

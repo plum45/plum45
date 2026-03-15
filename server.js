@@ -174,15 +174,20 @@ async function handleAgentActions(ctx, action, data, userId) {
                     const d = new Date(rawTime);
                     if (!isNaN(d.getTime())) {
                         parsedTime = d.toISOString();
+                    } else {
+                        // Attempt fallback for strings like "2026-03-15 10:00"
+                        const d2 = new Date(rawTime.replace(' ', 'T') + 'Z');
+                        if (!isNaN(d2.getTime())) parsedTime = d2.toISOString();
                     }
                 }
 
                 const eventData = {
-                    title: data.title || "Untitled Task",
+                    title: (data.title || "Untitled Task").trim(),
                     time: parsedTime,
-                    description: data.description || data.note || '',
+                    description: (data.description || data.note || '').trim(),
                     status: data.status || 'scheduled',
                     type: action,
+                    userId: String(userId), // Traceability
                     createdAt: admin.firestore.FieldValue.serverTimestamp()
                 };
 
