@@ -109,6 +109,28 @@ function extractActions(text) {
     return { cleanText, actions };
 }
 
+// OpenClaw-inspired: Intelligent Message Chunking
+async function smartReply(ctx, text) {
+    if (!text || text.length === 0) return;
+    const LIMIT = 4000; // Safe Telegram limit
+    if (text.length <= LIMIT) {
+        return await ctx.reply(text).catch(e => console.error('Reply Error:', e));
+    }
+
+    const sentences = text.match(/[^.!?\n]+[.!?\n]+/g) || [text];
+    let chunk = "";
+    for (const sentence of sentences) {
+        if ((chunk + sentence).length > LIMIT) {
+            await ctx.reply(chunk);
+            chunk = sentence;
+        } else {
+            chunk += sentence;
+        }
+    }
+    if (chunk) await ctx.reply(chunk);
+}
+
+
 async function handleAgentActions(ctx, action, data, userId) {
     if (!db) return;
     const userRef = db.collection('userActivities').doc(String(userId));
@@ -184,9 +206,13 @@ async function handleAgentActions(ctx, action, data, userId) {
                 }
 
                 if (success && buffer) {
-                    await ctx.replyWithPhoto({ source: buffer }, { 
-                        caption: `✨ วาดเสร็จแล้วครับ! (ใช้โมเดลระดับสูง)\n📌 คำสั่ง: ${cleanPrompt}` 
-                    });
+                    const caption = `✨ วาดเสร็จแล้วครับ! (ใช้โมเดลระดับสูง)\n📌 คำสั่ง: ${cleanPrompt}`;
+                    // OpenClaw-inspired: High-Res delivery if requested or by default for quality
+                    if (data.highRes) {
+                        await ctx.replyWithDocument({ source: buffer, filename: `${cleanPrompt.slice(0,20)}.png` }, { caption });
+                    } else {
+                        await ctx.replyWithPhoto({ source: buffer }, { caption });
+                    }
                 } else {
                     // Final Fallback: Direct URL for Telegram to handle
                     const fallbackUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?seed=${seed}`;
@@ -296,15 +322,15 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
         - [ACTION: WORK_LOG {"note": "...", "type": "..."}]
         - [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}]
-        - [ACTION: IMAGE_GEN {"prompt": "English descriptive prompt"}]
+        - [ACTION: IMAGE_GEN {"prompt": "...", "highRes": true/false}]
         - [ACTION: CREATE_SKILL {"name": "...", "description": "...", "schema": {}, "instructions": "..."}]
         - [ACTION: SET_IDENTITY {"roleDescription": "..."}]
         - [ACTION: WEB_SEARCH {"query": "..."}]
 
         [REASONING GUIDELINES]:
-        - หากเจ้านายสั่งให้ "วาดรูป" หรือ "เจนภาพ" คุณต้องใช้ [ACTION: IMAGE_GEN] เท่านั้น
-        - ในฟิลด์ prompt ของ IMAGE_GEN ให้เขียนบรรยายภาพเป็นภาษาอังกฤษที่ละเอียดเพื่อให้ได้ภาพที่สวยงาม
-        - หากเจ้านายถามเรื่องที่คุณไม่รู้ ให้ใช้ WEB_SEARCH ทันที
+        - หากเจ้านายสั่งให้ "วาดรูป" หรือ "เจนภาพ" ให้ใช้ [ACTION: IMAGE_GEN]. หากต้องการภาพแบบไฟล์ไม่ลดคุณภาพ ให้ใส่ "highRes": true
+        - ก่อนตัดสินใจใช้ SKILL ให้ดูเงื่อนไข "Routing" (Preferred/Avoid) ที่ระบุไว้ในแต่ละสกิล
+        - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
         - เมื่อได้รับไฟล์ (PDF/Text) ให้วิเคราะห์ตามบทบาทที่คุณเป็นอยู่`;
 
         const response = await axios.post(NVIDIA_API_URL, {
@@ -322,7 +348,8 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const reply = response.data.choices[0].message.content;
         const { cleanText, actions } = extractActions(reply);
         
-        await ctx.reply(cleanText || "ผมกำลังประมวลผลข้อมูลอยู่ครับ...");
+        // Using smartReply for robust delivery (Chunking support)
+        await smartReply(ctx, cleanText || "ผมกำลังประมวลผลข้อมูลอยู่ครับ...");
         
         for (const action of actions) {
             await handleAgentActions(ctx, action.type, action.data, userId);
