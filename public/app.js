@@ -36,8 +36,12 @@ function renderShell() {
 
     <main class="main">
       <header class="topbar">
-        <span class="topbar-t">Qwen Agent</span>
+        <span class="topbar-t">Qwen Agent <span class="pulse" id="pulse" title="System Live"></span></span>
         <div class="topbar-spacer"></div>
+        <button class="topbar-sched" id="openSkills" title="Manage AI Skills">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
+          <span>Skills</span>
+        </button>
         <button class="topbar-sched" id="openCalendar" title="Calendar events">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span>Calendar</span>
@@ -127,6 +131,9 @@ function renderShell() {
         <div class="ctrl"><div class="ctrl-row"><label>Top P</label><span class="ctrl-val" id="vTopP">0.95</span></div><input type="range" id="sTopP" min="0" max="1" step=".05" value=".95"><p class="ctrl-hint">Nucleus sampling threshold.</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Max Tokens</label><span class="ctrl-val" id="vMax">16384</span></div><input type="range" id="sMax" min="256" max="16384" step="256" value="16384"><p class="ctrl-hint">Maximum response length.</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Telegram ID Sync</label></div><input type="text" id="sTgId" class="ctrl-input" placeholder="Enter your Telegram ID"><p class="ctrl-hint">Enter your ID to sync your Telegram calendar.</p></div>
+        <div class="ctrl" style="margin-top:15px; border-top:1px solid var(--border); padding-top:10px;">
+          <div class="ctrl-row"><label>🛡️ Architecture Status</label><span id="sysStatus" style="font-size:.7rem;color:var(--text-3)">Checking nodes...</span></div>
+        </div>
       </div>
     </div>
   </div>
@@ -141,6 +148,22 @@ function renderShell() {
           <input type="time" id="schedTime" value="08:00">
           <input type="text" id="schedQuery" placeholder="e.g. สรุปข่าวเทคโนโลยีวันนี้">
           <button class="sched-add" id="schedAdd">+ Add</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-bg" id="skillsModal">
+    <div class="modal modal-lg">
+      <div class="modal-top"><h2>🛠️ Skill Architect</h2><button class="ibtn" id="closeSkills">✕</button></div>
+      <div class="modal-bd">
+        <p style="font-size:.82rem;color:var(--text-2);margin-bottom:12px">Define custom capabilities for Stacy. Use specific instructions and schemas.</p>
+        <div class="skill-grid" id="skillList"></div>
+        <div class="skill-form">
+          <input type="text" id="skName" placeholder="Skill Name (e.g. FlightBooker)">
+          <input type="text" id="skDesc" placeholder="Brief Description">
+          <textarea id="skInst" placeholder="Special Instructions / Logic" rows="3"></textarea>
+          <button class="sched-add" id="skAdd" style="width:100%">+ Install New Skill</button>
         </div>
       </div>
     </div>
@@ -232,6 +255,11 @@ function bindAll() {
   $('closeSched').addEventListener('click', () => $('schedModal').classList.remove('vis'));
   $('schedModal').addEventListener('click', e => { if (e.target.id === 'schedModal') $('schedModal').classList.remove('vis'); });
   $('schedAdd').addEventListener('click', addSchedule);
+
+  // Skills
+  $('openSkills').addEventListener('click', () => { $('skillsModal').classList.add('vis'); renderSkills(); });
+  $('closeSkills').addEventListener('click', () => $('skillsModal').classList.remove('vis'));
+  $('skAdd').addEventListener('click', addSkill);
 
   // Calendar
   $('openCalendar').addEventListener('click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
@@ -581,11 +609,65 @@ let taskCache = [];
 async function fetchTasks() {
     try {
         const id = S.settings.tgId || 'me';
-        console.log('Fetching tasks for:', id);
         const snap = await db.collection('userActivities').doc(id).collection('tasks').orderBy('createdAt', 'desc').get();
         taskCache = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
     } catch (e) { console.error('Tasks fetch error:', e); }
 }
+
+// ===== Skills Logic =====
+async function fetchSkills() {
+    try {
+        const id = S.settings.tgId || 'me';
+        const snap = await db.collection('userActivities').doc(id).collection('skills').get();
+        return snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+    } catch (e) { return []; }
+}
+
+async function renderSkills() {
+    const list = $('skillList');
+    list.innerHTML = '<div class="loading-sm">Fetching architecture...</div>';
+    const skills = await fetchSkills();
+    list.innerHTML = skills.length === 0 ? '<p style="color:var(--text-3);font-size:.8rem">No custom skills found.</p>' : '';
+    skills.forEach(s => {
+        const el = document.createElement('div');
+        el.className = 'skill-card';
+        el.innerHTML = `
+            <div class="skill-info">
+                <div class="skill-name">${esc(s.id)}</div>
+                <div class="skill-desc">${esc(s.description || 'No description')}</div>
+            </div>
+            <button class="ibtn danger" onclick="deleteSkill('${s.id}')">✕</button>
+        `;
+        list.appendChild(el);
+    });
+}
+
+async function addSkill() {
+    const n = $('skName').value.trim();
+    const d = $('skDesc').value.trim();
+    const i = $('skInst').value.trim();
+    if (!n) return showToast('Skill name is required');
+    const id = S.settings.tgId || 'me';
+    try {
+        await db.collection('userActivities').doc(id).collection('skills').doc(n).set({
+            name: n, description: d, instructions: i, type: 'manual'
+        });
+        showToast(`Skill ${n} installed!`);
+        $('skName').value = ''; $('skDesc').value = ''; $('skInst').value = '';
+        renderSkills();
+    } catch (e) { showToast('Sync failed: ' + e.message); }
+}
+
+window.deleteSkill = async (name) => {
+    if (!confirm(`Uninstall ${name}?`)) return;
+    const id = S.settings.tgId || 'me';
+    try {
+        await db.collection('userActivities').doc(id).collection('skills').doc(name).delete();
+        showToast(`${name} uninstalled.`);
+        renderSkills();
+    } catch (e) { showToast('Deletion failed'); }
+};
+
 
 async function renderCalendar() {
   await fetchTasks();
