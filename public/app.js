@@ -9,7 +9,7 @@ const S = {
   artifacts: [], activeArt: null,
   schedules: [], // {id, time:"HH:MM", query:"...", active:true}
   schedTimers: {},
-  settings: { temp: 0.7, topP: 0.9, maxTok: 16383, thinking: false, webSearch: false, mode: 'agent', model: 'z-ai/glm5', tgId: 'me' },
+  settings: { temp: 0.7, topP: 0.9, maxTok: 262144, thinking: false, webSearch: false, mode: 'agent', model: 'z-ai/glm5', tgId: 'me' },
   attachedFiles: [],
   termOpen: false, 
 };
@@ -138,7 +138,7 @@ function renderShell() {
         </div>
         <div class="ctrl"><div class="ctrl-row"><label>Temperature</label><span class="ctrl-val" id="vTemp">0.60</span></div><input type="range" id="sTemp" min="0" max="1" step=".05" value=".6"><p class="ctrl-hint">Lower = focused. Higher = creative.</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Top P</label><span class="ctrl-val" id="vTopP">0.95</span></div><input type="range" id="sTopP" min="0" max="1" step=".05" value=".95"><p class="ctrl-hint">Nucleus sampling threshold.</p></div>
-        <div class="ctrl"><div class="ctrl-row"><label>Max Tokens</label><span class="ctrl-val" id="vMax">16384</span></div><input type="range" id="sMax" min="256" max="16384" step="256" value="16384"><p class="ctrl-hint">Maximum response length.</p></div>
+        <div class="ctrl"><div class="ctrl-row"><label>Max Tokens (Context)</label><span class="ctrl-val" id="vMax">262144</span></div><input type="range" id="sMax" min="1024" max="262144" step="1024" value="262144"><p class="ctrl-hint">Maximum context/response length (up to 254k+).</p></div>
         <div class="ctrl"><div class="ctrl-row"><label>Telegram ID Sync</label></div><input type="text" id="sTgId" class="ctrl-input" placeholder="Enter your Telegram ID"><p class="ctrl-hint">Enter your ID to sync your Telegram calendar.</p></div>
         <div class="ctrl" style="margin-top:15px; border-top:1px solid var(--border); padding-top:10px;">
           <div class="ctrl-row"><label>🛡️ Architecture Status</label><span id="sysStatus" style="font-size:.7rem;color:var(--text-3)">Checking nodes...</span></div>

@@ -168,13 +168,31 @@ async function handleAgentActions(ctx, action, data, userId) {
             const userData = userDoc.data();
             const webhookUrl = userData?.calendarWebhookUrl;
 
+            // Pillar 9: Unified Calendar Sync (Firestore + External Webhook)
+            const eventData = {
+                title: data.title,
+                time: data.startTime || data.time || new Date().toISOString(),
+                description: data.description || '',
+                status: 'scheduled',
+                createdAt: admin.firestore.FieldValue.serverTimestamp()
+            };
+
+            // 1. Save to Firestore so it shows on Web Dashboard
+            await userRef.collection('tasks').add(eventData);
+
+            // 2. Sync to External Google Calendar if webhook available
             if (webhookUrl) {
-                await axios.post(webhookUrl, data);
-                await ctx.reply(`📅 ลงนัดหมายและซิงค์กับ Google Calendar เรียบร้อย: "${data.title}"`);
+                try {
+                    await axios.post(webhookUrl, data);
+                    await ctx.reply(`📅 ลงนัดหมายและซิงค์กับ Google Calendar เรียบร้อย: "${data.title}"`);
+                } catch (e) {
+                    await ctx.reply(`⚠️ บันทึกลงปฏิทินในระบบแล้ว แต่การซิงค์ภายนอกล้มเหลว: ${e.message}`);
+                }
             } else {
-                await ctx.reply('🔴 ยังไม่ได้เชื่อมต่อ Google Calendar ของคุณ กรุณาส่งลิงก์ Apps Script ผ่านเมนู CONNECT_WEBHOOK ก่อนครับ');
+                await ctx.reply(`📅 บันทึกลงปฏิทินในระบบเรียบร้อย: "${data.title}" (ยังไม่ได้เชื่อมต่อ Google Calendar ภายนอก)`);
             }
             break;
+
         case 'IMAGE_GEN':
             // Pillar 7: The "No-Failure" Visual Protocol (OpenClaw delivery style)
             const loadingMsg = await ctx.reply('🎨 Stacy กำลังรังสรรค์รูปภาพให้ครับเจ้านาย... (อาจใช้เวลา 15-45 วินาที)');
@@ -364,7 +382,27 @@ async function handleAgentActions(ctx, action, data, userId) {
                 console.error(err);
             }
             break;
+        case 'FETCH_API':
+            // { url: "...", method: "GET/POST", data: {}, headers: {} }
+            try {
+                await ctx.reply(`🌐 กำลังเรียกใช้ API: \`${data.url}\`...`);
+                const res = await axios({
+                    url: data.url,
+                    method: data.method || 'GET',
+                    data: data.data,
+                    headers: data.headers || { 'Content-Type': 'application/json' },
+                    timeout: 15000
+                });
+                const resStr = JSON.stringify(res.data, null, 2);
+                await smartReply(ctx, `📡 ตอบกลับจาก API:\n\`\`\`json\n${resStr.substring(0, 3000)}\n\`\`\``);
+                await logToTerminal(userId, `FETCH_API ${data.method || 'GET'}`, data.url);
+            } catch (err) {
+                ctx.reply(`❌ เรียก API ล้มเหลว: ${err.message}`);
+                await logToTerminal(userId, 'FETCH_API ERROR', err.message);
+            }
+            break;
         case 'READ_FILE':
+
 
 
             try {
@@ -451,8 +489,10 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const finalInput = fileContext ? `[FILE CONTENT]: ${fileContext}\n\n[USER MESSAGE]: ${userMsg || "Please process this file."}` : userMsg;
 
         const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
+        [CURRENT_TIME]: ${now} (Asia/Bangkok)
 
         [CORE RULES]:
+
         1. IDENTITY: You are currently acting as: ${memory.identity}.
         2. BEHAVIOR: ปรับสไตล์การพูด น้ำเสียง และคำลงท้าย (ครับ/ค่ะ/จ๊ะ) ให้ตรงตามบทบาท ${memory.identity} ที่เจ้านายสั่งไว้โดยเคร่งครัด
         3. MEMORY: สิ่งที่เรารู้เกี่ยวกับเจ้านาย: ${memory.facts.join(' | ') || "ยังไม่มีรายละเอียดพิเศษ"}
@@ -461,45 +501,39 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         ${userSkills || "No custom skills installed yet."}
 
         [ACTION CAPABILITIES]:
-        คุณต้องใช้รูปแบบนี้ท้ายข้อความเสมอเพื่อสั่งงาน:
-        - [ACTION: SAVE_TASK {"title": "...", "time": "..."}]
-        - [ACTION: WORK_LOG {"note": "...", "type": "..."}]
-        - [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}]
-        - [ACTION: IMAGE_GEN {"prompt": "...", "highRes": true/false}]
-        - [ACTION: CREATE_SKILL {"name": "...", "description": "...", "schema": {}, "instructions": "..."}]
-        - [ACTION: SET_IDENTITY {"roleDescription": "..."}]
-        - [ACTION: WEB_SEARCH {"query": "..."}]
-        - [ACTION: SEARCH_MEMORIES {}]
-        - [ACTION: EXECUTE_COMMAND {"command": "..."}]
-        - [ACTION: READ_FILE {"path": "..."}]
-        - [ACTION: SCREEN_CAPTURE {}]
-        - [ACTION: GET_PC_STATS {}]
-        - [ACTION: MORNING_BRIEF {"interests": "..."}]
         - [ACTION: WEB_BROWSE {"query": "...", "url": "...", "selector": "..."}]
+        - [ACTION: FETCH_API {"url": "...", "method": "GET/POST", "data": {}, "headers": {}}]
 
         [REASONING GUIDELINES]:
-        1. **IMPORTANT**: หากเจ้านายสั่ง "แคปจอ", "ถ่ายรูปหน้าจอ" **ห้าม** ใช้ EXECUTE_COMMAND เด็ดขาด! ให้ใช้ [ACTION: SCREEN_CAPTURE {}] เท่านั้น
-        2. **WEB NAVIGATION SELECTION**: 
-           - หากเจ้านายสั่ง "ค้นหาข้อมูล...", "อ่านข่าว...", "หาคำตอบเกี่ยวกับ...", "สรุปเนื้อหาจากเว็บ..." (ต้องการแค่ข้อมูลตัวอักษร) -> ให้ใช้ [ACTION: WEB_SEARCH {"query": "..."}] เพราะทำงานได้รวดเร็วกว่า
-           - หากเจ้านายสั่ง "ไปที่หน้าเว็บ...", "แคปจอเว็บ...", "ดูราคาหุ้นบนเว็บ...", "ขอดูรูปหน้าเว็บ..." (ต้องการเห็นภาพ) -> ให้ใช้ [ACTION: WEB_BROWSE {"query": "...", "url": "...", "selector": "..."}] เพื่อเปิดเบราว์เซอร์จริงและถ่ายภาพส่งให้
-        3. หากเจ้านายสั่ง "ขอดูสเปก", "เช็คแรม", "สเตตัสคอม" **ห้าม** ใช้ EXECUTE_COMMAND เด็ดขาด! ให้ใช้ [ACTION: GET_PC_STATS {}] เท่านั้น
+        1. **IMPORTANT**: ระบบปัจจุบันเป็น **Windows OS** ห้ามใช้ Single Quote (') ในการรันคำสั่ง Shell ให้ใช้ Double Quote (") เท่านั้น และห้ามใช้ Bash Expansion เช่น $(date)
+        2. **API & WEB**:
+           - หากต้องการส่งข้อมูลไป Google Script หรือดึง API **ห้าม** ใช้ curl ใน EXECUTE_COMMAND เพราะจะเกิดปัญหาเรื่อง Quoting ให้ใช้ [ACTION: FETCH_API] แทน
+           - หากต้องการค้นหาข้อมูลตัวอักษร -> [ACTION: WEB_SEARCH]
+           - หากต้องการเห็นภาพหน้าเว็บ -> [ACTION: WEB_BROWSE]
+        3. **SCREEN & PC**:
+           - หากเจ้านายสั่ง "แคปจอ" -> [ACTION: SCREEN_CAPTURE {}] **(ห้ามใช้ Shell command)**
+           - หากเจ้านายสั่ง "เช็กแรม/สเปก" -> [ACTION: GET_PC_STATS {}] **(ห้ามใช้ Shell command)**
+
         4. หากเจ้านายต้องการสรุปช่วงเช้า หรือ "Morning Brief" ให้ใช้ [ACTION: MORNING_BRIEF {"interests": "..."}]
         5. หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม" หรือ "เช็คไฟล์" ให้ใช้ [ACTION: EXECUTE_COMMAND {"command": "..."}]
         6. หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE {"path": "..."}]
         7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
         8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
-        9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)`;
+        9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
+        10. ทุกนัดหมายที่เพิ่มจะไปปรากฏที่ "Calendar Dashboard" ของเจ้านายทันทีครับ`;
 
 
         const response = await axios.post(NVIDIA_API_URL, {
-            model: 'moonshotai/kimi-k2-instruct',
+            model: 'moonshotai/kimi-k2-instruct', // Supports large context
             messages: [
                 { role: 'system', content: systemPrompt },
                 ...userStore.history.slice(-10),
                 { role: 'user', content: finalInput }
             ],
-            temperature: 0.6
+            temperature: 0.6,
+            max_tokens: 32768 // Allowing long responses
         }, {
+
             headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' }
         });
 
