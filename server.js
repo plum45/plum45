@@ -149,11 +149,27 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         case 'IMAGE_GEN':
+            // Pillar 7: Improved Visual Creation with Logging
             try {
-                const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(data.prompt)}?seed=${Math.floor(Math.random()*10000)}&width=1024&height=1024&nologo=true`;
-                const response = await axios.get(imageUrl, { responseType: 'arraybuffer' });
-                await ctx.replyWithPhoto({ source: Buffer.from(response.data) }, { caption: `🎨 วาดให้แล้วครับ: ${data.prompt}` });
-            } catch (err) { ctx.reply(`❌ วาดรูปไม่สำเร็จ: ${err.message}`); }
+                const cleanPrompt = (data.prompt || "highly detailed digital art").substring(0, 500).replace(/[^\w\s\u0E00-\u0E7F,]/g, '');
+                const seed = Math.floor(Math.random() * 1000000);
+                const imageUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
+                
+                console.log(`🖼️ Generating Image: ${imageUrl}`);
+                
+                const response = await axios.get(imageUrl, { 
+                    responseType: 'arraybuffer',
+                    timeout: 45000 // Extended timeout for generation
+                });
+                
+                await ctx.replyWithPhoto({ source: Buffer.from(response.data) }, { 
+                    caption: `🎨 วาดเสร็จแล้วครับเจ้านาย!\n📌 คำสั่ง: ${cleanPrompt}` 
+                });
+                console.log(`✅ Image sent successfully to user ${userId}`);
+            } catch (err) {
+                console.error('❌ IMAGE_GEN Detail Error:', err.response ? `${err.response.status} - ${err.response.statusText}` : err.message);
+                ctx.reply(`❌ วาดรูปไม่สำเร็จ (ระบบแม่ข่ายมีปัญหาชั่วคราว): ${err.message}\nเจ้านายลองสั่งใหม่อีกครั้ง หรือใช้คำสั่งที่สั้นลงดูนะครับ`);
+            }
             break;
         case 'CREATE_SKILL':
         case 'UPDATE_SKILL':
