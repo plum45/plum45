@@ -149,26 +149,45 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         case 'IMAGE_GEN':
-            // Pillar 7: Improved Visual Creation with Logging
+            // Pillar 7: Master Fix (Dual-Layer Fallback Approach)
+            const loadingMsg = await ctx.reply('🎨 กำลังรังสรรค์รูปภาพให้เด็ดขาดตามสั่งครับเจ้านาย... (อาจใช้เวลาประมาณ 10-20 วินาที)');
             try {
-                const cleanPrompt = (data.prompt || "highly detailed digital art").substring(0, 500).replace(/[^\w\s\u0E00-\u0E7F,]/g, '');
+                // Ensure prompt is English-only for maximum compatibility with Pollinations API
+                const rawPrompt = data.prompt || "stunning visual";
+                const cleanPrompt = rawPrompt.replace(/[^\x00-\x7F]/g, "").substring(0, 400) || "modern digital art";
                 const seed = Math.floor(Math.random() * 1000000);
-                const imageUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=flux&nologo=true`;
                 
-                console.log(`🖼️ Generating Image: ${imageUrl}`);
+                // Using the most stable API endpoint
+                const targetUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&nologo=true`;
                 
-                const response = await axios.get(imageUrl, { 
-                    responseType: 'arraybuffer',
-                    timeout: 45000 // Extended timeout for generation
-                });
-                
-                await ctx.replyWithPhoto({ source: Buffer.from(response.data) }, { 
-                    caption: `🎨 วาดเสร็จแล้วครับเจ้านาย!\n📌 คำสั่ง: ${cleanPrompt}` 
-                });
-                console.log(`✅ Image sent successfully to user ${userId}`);
+                console.log(`🖼️ Final Attempting Image: ${targetUrl}`);
+
+                try {
+                    // Layer 1: Internal Buffer Fetch (Fastest)
+                    const response = await axios.get(targetUrl, { 
+                        responseType: 'arraybuffer',
+                        timeout: 50000,
+                        headers: { 
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+                        }
+                    });
+                    
+                    await ctx.replyWithPhoto({ source: Buffer.from(response.data) }, { 
+                        caption: `✨ วาดเสร็จแล้วครับเจ้านาย! (แบบ High-Res)\n📌 Prompt: ${cleanPrompt}` 
+                    });
+                    await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
+                } catch (fetchErr) {
+                    console.warn('⚠️ Buffer fetch failed, using Direct URL Fallback...', fetchErr.message);
+                    // Layer 2: Direct URL Fallback (Most Reliable if Layer 1 fails)
+                    await ctx.replyWithPhoto(targetUrl, { 
+                        caption: `✨ วาดเสร็จแล้วครับเจ้านาย! (ส่งผ่านลิงก์สำรองเนื่องจากเซิร์ฟเวอร์หลักหนาแน่น)\n📌 Prompt: ${cleanPrompt}` 
+                    });
+                    await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
+                }
             } catch (err) {
-                console.error('❌ IMAGE_GEN Detail Error:', err.response ? `${err.response.status} - ${err.response.statusText}` : err.message);
-                ctx.reply(`❌ วาดรูปไม่สำเร็จ (ระบบแม่ข่ายมีปัญหาชั่วคราว): ${err.message}\nเจ้านายลองสั่งใหม่อีกครั้ง หรือใช้คำสั่งที่สั้นลงดูนะครับ`);
+                console.error('❌ IMAGE_GEN Fatal Error:', err.message);
+                ctx.reply(`❌ ขออภัยครับเจ้านาย ระบบวาดรูปขัดข้องรุนแรง: ${err.message}`);
+                await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
             }
             break;
         case 'CREATE_SKILL':
