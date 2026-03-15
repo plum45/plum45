@@ -64,21 +64,27 @@ const tgContexts = new Map(); // Store conversation history
 // ========== Core Logic Pillars & Actions ==========
 
 async function getBotMemory(userId) {
-    if (!db) return ["Firebase disconnected - using temporary memory only"];
+    if (!db) return { facts: [], identity: "Stacy AI Agent" };
     try {
         const doc = await db.collection('userActivities').doc(String(userId)).get();
-        return doc.exists && doc.data().facts ? doc.data().facts : [];
-    } catch (e) { return []; }
+        const data = doc.exists ? doc.data() : {};
+        return {
+            facts: data.facts || [],
+            identity: data.identity || "Stacy AI Agent"
+        };
+    } catch (e) { return { facts: [], identity: "Stacy AI Agent" }; }
 }
 
 async function saveBotMemory(userId, userMsg, botReply) {
     if (!db) return;
     try {
         const userRef = db.collection('userActivities').doc(String(userId));
-        // Subtle learning: Extract facts from user message (simplified for this demo)
         const facts = [];
-        if (userMsg.includes('ชื่อ')) facts.push(`ผู้ใช้ชื่อ: ${userMsg.split('ชื่อ').pop().trim()}`);
-        if (userMsg.includes('ชอบ')) facts.push(`ผู้ใช้ชอบ: ${userMsg.split('ชอบ').pop().trim()}`);
+        
+        // Simple extraction for now - could be upgraded to AI extraction later
+        if (userMsg.includes('ชื่อ')) facts.push(`ผู้ใช้คนนี้ชื่อ: ${userMsg.split('ชื่อ').pop().trim()}`);
+        if (userMsg.includes('ชอบ')) facts.push(`สิ่งที่ชอบ: ${userMsg.split('ชอบ').pop().trim()}`);
+        if (userMsg.includes('ทำงานที่')) facts.push(`สถานที่ทำงาน: ${userMsg.split('ทำงานที่').pop().trim()}`);
         
         if (facts.length > 0) {
             await userRef.set({ facts: admin.firestore.FieldValue.arrayUnion(...facts) }, { merge: true });
@@ -174,6 +180,11 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await ctx.reply(`📥 นำเข้าสกิลจาก ${data.url} สำเร็จครับ!`);
             } catch (err) { ctx.reply(`❌ นำเข้าไม่สำเร็จ: ${err.message}`); }
             break;
+        case 'SET_IDENTITY':
+            // Permanent Role Learning
+            await userRef.set({ identity: data.roleDescription }, { merge: true });
+            await ctx.reply(`🧠 รับทราบครับ! ผมได้บันทึกตัวตนใหม่ของผมแล้ว: **"${data.roleDescription}"**\nผมจะจำสิ่งนี้ไว้ตลอดไปและปรับการทำงานให้ตรงตามบทบาทนี้ครับ`);
+            break;
     }
 }
 
@@ -189,7 +200,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         const userStore = tgContexts.get(userId);
         
         // --- GAIN KNOWLEDGE: Memory & Skills ---
-        const [personalFacts, userSkills] = await Promise.all([
+        const [memory, userSkills] = await Promise.all([
             getBotMemory(userId),
             (async () => {
                 const snap = await db.collection('userActivities').doc(String(userId)).collection('skills').get();
@@ -202,30 +213,27 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
         const finalInput = fileContext ? `[FILE CONTENT]: ${fileContext}\n\n[USER MESSAGE]: ${userMsg || "Please process this file."}` : userMsg;
 
-        const systemPrompt = `คุณคือ Stacy AI Agent (Pillar Architect Mode)
+        const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
 
         [CORE RULES]:
-        1. IDENTITY: Proactive, intelligent, and useful. Use "ครับ".
-        2. TECHNICAL SKILLS: You have a library of skills. Each has Metadata, Schema (JSON), and Instructions (Logic).
-        3. FUNCTION CALLING: If a user command matches a skill's [Metadata] or [Schema], strictly follow its [Instructions].
-        4. MULTIMODAL: You can read files (PDF/Text). If a file contains data (like decibel levels or blood types), analyze it using your reasoning.
-
-        [CURRENT TIME]: ${now}
-        [USER SKILLS LIBRARY]:
-        ${userSkills || "No custom skills installed yet. Suggest user to create one using metadata/schema pattern."}
+        1. IDENTITY: You are currently acting as: ${memory.identity}.
+        2. BEHAVIOR: Proactive, intelligent, and useful. Use "ครับ".
+        3. MEMORY: What you know about the user: ${memory.facts.join(' | ') || "No specific details yet."}
+        
+        [TECHNICAL SKILLS & FUNCTION CALLING]:
+        ${userSkills || "No custom skills installed yet."}
 
         [ACTION CAPABILITIES]:
         - SAVE_TASK {"title": "...", "time": "..."}
         - WORK_LOG {"note": "...", "type": "..."}
         - ADD_CALENDAR_EVENT {"title": "...", "startTime": "ISO_DATE", "description": "..."}
-        - IMAGE_GEN {"prompt": "English description"}
+        - IMAGE_GEN {"prompt": "..."}
         - CREATE_SKILL {"name": "...", "description": "...", "schema": {...}, "instructions": "..."}
-        - UPDATE_SKILL {"name": "...", "description": "...", "schema": {...}, "instructions": "..."}
+        - SET_IDENTITY {"roleDescription": "คำอธิบายตัวตนหรือบทบาทถาวรของคุณ"}
 
         [REASONING GUIDELINES]:
-        - If user feedback is given, use UPDATE_SKILL to adapt.
-        - Encourage user to define skills with JSON Schema for precision.
-        - Example: A 'Blood Test' skill with schema {"rh": "string", "type": "string"}.`;
+        - หากพากผู้ใช้สั่งให้คุณทำหน้าที่เป็นอะไร (เช่น เรขา, ครู, หมอ) ให้ใช้ SET_IDENTITY เพื่อบันทึกบทบาทนั้นถาวร
+        - เมื่อได้รับไฟล์ (PDF/Text) ให้วิเคราะห์ตามบทบาทที่คุณเป็นอยู่`;
 
         const response = await axios.post(NVIDIA_API_URL, {
             model: 'moonshotai/kimi-k2-instruct',
