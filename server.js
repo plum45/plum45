@@ -76,22 +76,8 @@ async function getBotMemory(userId) {
     } catch (e) { return { facts: [], identity: "Stacy AI Agent" }; }
 }
 
-async function saveBotMemory(userId, userMsg, botReply) {
-    if (!db) return;
-    try {
-        const userRef = db.collection('userActivities').doc(String(userId));
-        const facts = [];
-        
-        // Simple extraction for now - could be upgraded to AI extraction later
-        if (userMsg.includes('ชื่อ')) facts.push(`ผู้ใช้คนนี้ชื่อ: ${userMsg.split('ชื่อ').pop().trim()}`);
-        if (userMsg.includes('ชอบ')) facts.push(`สิ่งที่ชอบ: ${userMsg.split('ชอบ').pop().trim()}`);
-        if (userMsg.includes('ทำงานที่')) facts.push(`สถานที่ทำงาน: ${userMsg.split('ทำงานที่').pop().trim()}`);
-        
-        if (facts.length > 0) {
-            await userRef.set({ facts: admin.firestore.FieldValue.arrayUnion(...facts) }, { merge: true });
-        }
-    } catch (e) { console.error('Memory Save Error:', e); }
-}
+// Utility: Save and Sync functions are defined below for architectural clarity.
+
 
 function extractActions(text) {
     const actions = [];
