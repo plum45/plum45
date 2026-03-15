@@ -159,6 +159,14 @@ async function handleAgentActions(userId, replyText, ctx) {
                 await userRef.set({ webhookUrl: data.url }, { merge: true });
                 await ctx.reply(`🔗 เชื่อมต่อกับแอปภายนอกสำเร็จ: ${data.url}`);
                 break;
+            case 'CREATE_SKILL':
+                // Pillar 6: User-defined Skills
+                await userRef.collection('skills').doc(data.name).set({
+                    ...data,
+                    createdAt: new Date()
+                });
+                await ctx.reply(`✨ สกิลใหม่ถูกติดตั้งแล้ว: **"${data.name}"**\nคุณสามารถเรียกใช้งานได้โดยพิมพ์ "ใช้สกิล ${data.name} [เนื้อหา]" ครับ`);
+                break;
             case 'ADD_CALENDAR_EVENT':
                 // Pillar 3: Save to internal Task list FIRST (Backup)
                 const internalTask = {
@@ -222,6 +230,7 @@ if (bot) {
         { command: 'help', description: 'วิธีใช้งานและคำสั่งทั้งหมด' },
         { command: 'schedule', description: 'ดูตารางงานที่จดไว้' },
         { command: 'logs', description: 'ดูบันทึกเวลางานล่าสุด' },
+        { command: 'skills', description: 'ดูรายการสกิลทั้งหมดของคุณ' },
         { command: 'memory', description: 'ดูว่า Stacy จำอะไรเกี่ยวกับคุณได้บ้าง' },
         { command: 'status', description: 'เช็คสถานะระบบและการเชื่อมต่อ' },
         { command: 'clear', description: 'ล้างประวัติการคุยปัจจุบัน' }
@@ -286,6 +295,20 @@ if (bot) {
             console.error('Schedule Fetch Error:', e);
             ctx.reply(`❌ ไม่สามารถดึงตารางงานได้: ${e.message}`);
         }
+    });
+
+    bot.command('skills', async (ctx) => {
+        const userId = ctx.from.id;
+        try {
+            const snapshot = await db.collection('userActivities').doc(String(userId)).collection('skills').get();
+            if (snapshot.empty) return ctx.reply('🛠️ คุณยังไม่มีสกิลพิเศษครับ ลองสั่ง "สร้างสกิลใหม่..." ดูสิครับ!');
+            let text = "🛠️ **รายการสกิลของคุณ:**\n\n";
+            snapshot.forEach(doc => {
+                const s = doc.data();
+                text += `🔸 **${s.name}**: ${s.description || 'ไม่มีคำอธิบาย'}\n`;
+            });
+            ctx.reply(text);
+        } catch (e) { ctx.reply('❌ ไม่สามารถดึงข้อมูลสกิลได้'); }
     });
 
     bot.command('logs', async (ctx) => {
@@ -383,9 +406,16 @@ if (bot) {
             if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], state: 'idle' });
             const userStore = tgContexts.get(userId);
             
-            // --- PILLAR 2: MEMORY ARCHITECTURE (Long-term Recall) ---
-            const [personalFacts, searchData] = await Promise.all([
+            // --- PILLAR 2: MEMORY & SKILL ARCHITECTURE ---
+            const [personalFacts, userSkills, searchData] = await Promise.all([
                 getBotMemory(userId),
+                (async () => {
+                    const snap = await db.collection('userActivities').doc(String(userId)).collection('skills').get();
+                    return snap.docs.map(doc => {
+                        const s = doc.data();
+                        return `SKILL [${s.name}]: ${s.instructions || s.description || s.prompt}`;
+                    }).join('\n');
+                })(),
                 (async () => {
                     const isWeather = /อากาศ|ฝน|ตกไหม|พยากรณ์|weather|temp/i.test(userMsg);
                     const isNews = /ข่าว|ล่าสุด|news|update/i.test(userMsg);
@@ -402,6 +432,9 @@ if (bot) {
                 [STATE]: ${userStore.state}
                 
                 [MEMORY]: User facts: ${personalFacts.join(' | ')}
+                [USER SKILLS LIBRARY]: 
+                ${userSkills || "No custom skills installed."}
+
                 [INPUT/SEARCH]: ${searchData || "No new data."}
 
                 [ACTION CAPABILITIES]:
@@ -411,15 +444,18 @@ if (bot) {
                 3. To sync with Google Calendar: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "startTime": "YYYY-MM-DDTHH:mm:ss", "description": "..."}]
                 4. To set/change webhook: [ACTION: CONNECT_WEBHOOK {"url": "..."}]
                 5. To export work logs: [ACTION: GENERATE_REPORT {}]
+                6. To CREATE A NEW SKILL (Pillar 6): [ACTION: CREATE_SKILL {"name": "...", "description": "...", "instructions": "How to perform this skill"}]
 
                 [CALENDAR RULE]: When user says "tomorrow", "next week", etc., you MUST calculate the exact ISO date based on ${now} and put it in "startTime".
 
                 [REASONING GUIDELINES]:
                 1. Task Decomposition: Understand the goal. 
-                2. Self-Correction: Identify user routines and patterns from MEMORY. 
-                3. Proactivity: If user seems busy, suggest using GENERATE_REPORT for easier tracking.
-                4. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
-                5. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
+                2. Skill Invocation: If user asks to use a specific skill from the library, strictly follow those [USER SKILLS LIBRARY] instructions.
+                3. Self-Correction: Identify user routines and patterns from MEMORY. 
+                4. Proactivity: If user seems busy, suggest using GENERATE_REPORT for easier tracking.
+                5. CREATE SKILL: If user asks to "สร้างสกิล" or "เพิ่มความสามารถใหม่", use CREATE_SKILL action.
+                6. LANGUAGE RULE: REPLY ONLY IN THAI (ภาษาไทย) WITH "ครับ". 
+                7. INTEGRATION: If user mentions "Calendar", "นัดหมาย", or "ตารางนัด", use ADD_CALENDAR_EVENT.` },
                 ...userStore.history.slice(-8),
                 { role: 'user', content: userMsg }
             ];
