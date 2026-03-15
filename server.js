@@ -141,6 +141,21 @@ async function smartReply(ctx, text) {
     }
     if (chunk) await ctx.reply(chunk);
 }
+async function sendSmartImage(ctx, source, caption) {
+    try {
+        // Try sending as photo first (prettier)
+        await ctx.replyWithPhoto({ source }, { caption });
+    } catch (err) {
+        if (err.description && err.description.includes('PHOTO_INVALID_DIMENSIONS')) {
+            console.log('⚠️ Photo dimensions invalid, falling back to document mode...');
+            await ctx.replyWithDocument({ source, filename: 'capture.png' }, { 
+                caption: caption + '\n\n(หมายเหตุ: ส่งเป็นไฟล์เนื่องจากขนาดภาพไม่รองรับโหมดรูปภาพครับ)' 
+            });
+        } else {
+            throw err;
+        }
+    }
+}
 
 
 async function handleAgentActions(ctx, action, data, userId) {
@@ -327,8 +342,8 @@ async function handleAgentActions(ctx, action, data, userId) {
             try {
                 const imgPath = path.join(__dirname, `screenshot_${Date.now()}.png`);
                 await screenshot({ filename: imgPath });
-                await ctx.replyWithPhoto({ source: imgPath }, { caption: '📸 จับภาพหน้าจอปัจจุบันให้แล้วครับเจ้านาย' });
-                fs.unlinkSync(imgPath); // Delete after send
+                await sendSmartImage(ctx, imgPath, '📸 จับภาพหน้าจอปัจจุบันให้แล้วครับเจ้านาย');
+                if (fs.existsSync(imgPath)) fs.unlinkSync(imgPath);
                 await logToTerminal(userId, 'SCREEN_CAPTURE', 'Captured and sent to Telegram');
             } catch (err) { ctx.reply(`❌ แคปหน้าจอไม่สำเร็จ: ${err.message}`); }
             break;
@@ -351,15 +366,16 @@ async function handleAgentActions(ctx, action, data, userId) {
             } catch (err) { ctx.reply(`❌ Morning Brief ไม่สำเร็จ: ${err.message}`); }
             break;
         case 'WEB_BROWSE':
-            // { query?: "...", url?: "...", selector?: "..." }
+            let browser = null;
+            let screenshotPath = path.join(__dirname, `web_capture_${Date.now()}.png`);
             try {
                 await ctx.reply('🌐 กำลังเปิดเบราว์เซอร์เพื่อเข้าถึงข้อมูลและแคปหน้าจอให้ครับ...');
-                const browser = await puppeteer.launch({ 
+                browser = await puppeteer.launch({ 
                     headless: "new",
                     args: ['--no-sandbox', '--disable-setuid-sandbox'] 
                 });
                 const page = await browser.newPage();
-                await page.setViewport({ width: 1280, height: 800 });
+                await page.setViewport({ width: 1440, height: 900 });
                 
                 let targetUrl = data.url;
                 if (!targetUrl && data.query) {
@@ -371,9 +387,8 @@ async function handleAgentActions(ctx, action, data, userId) {
 
                 if (!targetUrl) throw new Error("ไม่พบ URL หรือคำค้นหาที่ถูกต้อง");
 
-                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 45000 });
+                await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 50000 });
                 
-                const screenshotPath = path.join(__dirname, `web_capture_${Date.now()}.png`);
                 if (data.selector) {
                     const element = await page.$(data.selector);
                     if (element) {
@@ -382,19 +397,18 @@ async function handleAgentActions(ctx, action, data, userId) {
                         await page.screenshot({ path: screenshotPath });
                     }
                 } else {
-                    await page.screenshot({ path: screenshotPath });
+                    await page.screenshot({ path: screenshotPath, fullPage: data.fullPage || false });
                 }
 
-                await ctx.replyWithPhoto({ source: screenshotPath }, { 
-                    caption: `🌐 แคปภาพจาก: ${targetUrl}\n${data.selector ? `🎯 ส่วนที่เลือก: ${data.selector}` : ''}` 
-                });
+                await sendSmartImage(ctx, screenshotPath, `🌐 แคปภาพจาก: ${targetUrl}\n${data.selector ? `🎯 ส่วนที่เลือก: ${data.selector}` : ''}`);
                 
-                await browser.close();
-                if (fs.existsSync(screenshotPath)) fs.unlinkSync(screenshotPath);
                 await logToTerminal(userId, 'WEB_BROWSE', `Captured site: ${targetUrl}`);
             } catch (err) {
                 ctx.reply(`❌ ภารกิจเบราว์เซอร์ล้มเหลว: ${err.message}`);
-                console.error(err);
+                console.error('Web Browse Error:', err);
+            } finally {
+                if (browser) await browser.close();
+                if (fs.existsSync(screenshotPath)) fs.unlinkSync(screenshotPath);
             }
             break;
         case 'FETCH_API':
