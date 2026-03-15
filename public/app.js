@@ -246,65 +246,77 @@ function renderSuggestions() {
 // ===== Event Binding =====
 function bindAll() {
   const $ = id => document.getElementById(id);
+  const safeBind = (id, event, fn) => {
+    const el = $(id);
+    if (el) el.addEventListener(event, fn);
+    else console.warn(`⚠️ Binding failed: Element #${id} not found.`);
+  };
 
-  $('sendBtn').addEventListener('click', handleSend);
-  $('input').addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } });
-  $('input').addEventListener('input', () => { autoResize(); updateSendBtn(); });
-  $('newChat').addEventListener('click', newChat);
-  $('mobBtn').addEventListener('click', () => $('side').classList.toggle('open'));
-  $('sideOverlay').addEventListener('click', () => $('side').classList.remove('open'));
-  $('thinkPill').addEventListener('click', () => { S.settings.thinking = !S.settings.thinking; updateThinkPill(); save(); });
-  $('webPill').addEventListener('click', () => { S.settings.webSearch = !S.settings.webSearch; updateWebPill(); save(); });
-  $('attachBtn').addEventListener('click', () => $('fileInput').click());
-  $('fileInput').addEventListener('change', handleFileAttach);
+  safeBind('sendBtn', 'click', handleSend);
+  safeBind('input', 'keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } });
+  safeBind('input', 'input', () => { autoResize(); updateSendBtn(); });
+  safeBind('newChat', 'click', newChat);
+  safeBind('mobBtn', 'click', () => $('side').classList.toggle('open'));
+  safeBind('sideOverlay', 'click', () => $('side').classList.remove('open'));
+  safeBind('thinkPill', 'click', () => { S.settings.thinking = !S.settings.thinking; updateThinkPill(); save(); });
+  safeBind('webPill', 'click', () => { S.settings.webSearch = !S.settings.webSearch; updateWebPill(); save(); });
+  safeBind('attachBtn', 'click', () => $('fileInput').click());
+  safeBind('fileInput', 'change', handleFileAttach);
 
   // Settings
-  $('openSettings').addEventListener('click', () => $('settingsModal').classList.add('vis'));
-  $('closeSettings').addEventListener('click', () => $('settingsModal').classList.remove('vis'));
-  $('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') $('settingsModal').classList.remove('vis'); });
-  $('sMode').addEventListener('change', e => { S.settings.mode = e.target.value; save(); });
-  $('sModel').addEventListener('change', e => { S.settings.model = e.target.value; save(); });
-  $('sTemp').addEventListener('input', e => { S.settings.temp = +e.target.value; $('vTemp').textContent = S.settings.temp.toFixed(2); save(); });
-  $('sTopP').addEventListener('input', e => { S.settings.topP = +e.target.value; $('vTopP').textContent = S.settings.topP.toFixed(2); save(); });
-  $('sMax').addEventListener('input', e => { S.settings.maxTok = +e.target.value; $('vMax').textContent = S.settings.maxTok; save(); });
-  $('sTgId').addEventListener('input', e => { 
+  safeBind('openSettings', 'click', () => $('settingsModal').classList.add('vis'));
+  safeBind('closeSettings', 'click', () => $('settingsModal').classList.remove('vis'));
+  if ($('settingsModal')) $('settingsModal').addEventListener('click', e => { if (e.target.id === 'settingsModal') $('settingsModal').classList.remove('vis'); });
+  safeBind('sMode', 'change', e => { S.settings.mode = e.target.value; save(); });
+  safeBind('sModel', 'change', e => { S.settings.model = e.target.value; save(); });
+  safeBind('sTemp', 'input', e => { S.settings.temp = +e.target.value; $('vTemp').textContent = S.settings.temp.toFixed(2); save(); });
+  safeBind('sTopP', 'input', e => { S.settings.topP = +e.target.value; $('vTopP').textContent = S.settings.topP.toFixed(2); save(); });
+  safeBind('sMax', 'input', e => { S.settings.maxTok = +e.target.value; $('vMax').textContent = S.settings.maxTok; save(); });
+  safeBind('sTgId', 'input', e => { 
     S.settings.tgId = e.target.value; 
     save(); 
-    fetchTasks(); // Real-time sync attempt
+    fetchTasks();
   });
 
   // Scheduler
-  $('openSched').addEventListener('click', () => { $('schedModal').classList.add('vis'); renderSchedList(); });
-  $('closeSched').addEventListener('click', () => $('schedModal').classList.remove('vis'));
-  $('schedModal').addEventListener('click', e => { if (e.target.id === 'schedModal') $('schedModal').classList.remove('vis'); });
-  $('schedAdd').addEventListener('click', addSchedule);
+  safeBind('openSched', 'click', () => { $('schedModal').classList.add('vis'); renderSchedList(); });
+  safeBind('closeSched', 'click', () => $('schedModal').classList.remove('vis'));
+  if ($('schedModal')) $('schedModal').addEventListener('click', e => { if (e.target.id === 'schedModal') $('schedModal').classList.remove('vis'); });
+  safeBind('schedAdd', 'click', addSchedule);
 
   // Skills
-  $('openSkills').addEventListener('click', () => { $('skillsModal').classList.add('vis'); renderSkills(); });
-  $('closeSkills').addEventListener('click', () => $('skillsModal').classList.remove('vis'));
-  $('skAdd').addEventListener('click', addSkill);
-  $('toggleTerm').addEventListener('click', toggleTerm);
-  $('termMin').addEventListener('click', toggleTerm);
-
+  safeBind('openSkills', 'click', () => { $('skillsModal').classList.add('vis'); renderSkills(); });
+  safeBind('closeSkills', 'click', () => $('skillsModal').classList.remove('vis'));
+  safeBind('skAdd', 'click', addSkill);
+  safeBind('toggleTerm', 'click', toggleTerm);
+  safeBind('termMin', 'click', toggleTerm);
 
   // Calendar
-  $('openCalendar').addEventListener('click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
-  $('closeCalendar').addEventListener('click', () => $('calendarModal').classList.remove('vis'));
-  $('calPrev').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); });
-  $('calNext').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); });
-  $('calendarModal').addEventListener('click', e => { if (e.target.id === 'calendarModal') $('calendarModal').classList.remove('vis'); });
-  $('closeMemory').addEventListener('click', () => $('memoryModal').classList.remove('vis'));
-  $('openMemory').addEventListener('click', () => { $('memoryModal').classList.add('vis'); renderMemory(); });
-  $('closeTask').addEventListener('click', () => $('taskModal').classList.remove('vis'));
+  safeBind('openCalendar', 'click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
+  safeBind('closeCalendar', 'click', () => $('calendarModal').classList.remove('vis'));
+  safeBind('calPrev', 'click', () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); });
+  safeBind('calNext', 'click', () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); });
+  if ($('calendarModal')) $('calendarModal').addEventListener('click', e => { if (e.target.id === 'calendarModal') $('calendarModal').classList.remove('vis'); });
+  
+  // Memory
+  safeBind('openMemory', 'click', () => { $('memoryModal').classList.add('vis'); renderMemory(); });
+  safeBind('closeMemory', 'click', () => $('memoryModal').classList.remove('vis'));
+  if ($('memoryModal')) $('memoryModal').addEventListener('click', e => { if (e.target.id === 'memoryModal') $('memoryModal').classList.remove('vis'); });
+  
+  safeBind('closeTask', 'click', () => $('taskModal').classList.remove('vis'));
 
   // Artifact
-  $('artClose').addEventListener('click', closeArt);
-  $('artCopy').addEventListener('click', () => {
+  safeBind('artClose', 'click', closeArt);
+  safeBind('artCopy', 'click', () => {
     navigator.clipboard.writeText($('artCode').textContent).then(() => showToast('✅ Copied to clipboard'));
   });
 
   document.addEventListener('keydown', e => {
-    if (e.key === 'Escape') { $('settingsModal').classList.remove('vis'); $('schedModal').classList.remove('vis'); closeArt(); $('side').classList.remove('open'); }
+    if (e.key === 'Escape') { 
+        document.querySelectorAll('.modal-bg').forEach(m => m.classList.remove('vis'));
+        closeArt(); 
+        $('side').classList.remove('open'); 
+    }
   });
 }
 
