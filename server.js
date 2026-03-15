@@ -9,6 +9,8 @@ const { Telegraf } = require('telegraf');
 const pdf = require('pdf-parse');
 const cheerio = require('cheerio');
 const google = require('googlethis');
+const { exec } = require('child_process');
+
 
 // ========== Configuration & Environment ==========
 const PORT = process.env.PORT || 10000;
@@ -250,7 +252,26 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await ctx.reply(`🔍 เจ้านายครับ ผมไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วครับ:\n\n${results.substring(0, 1000)}...`);
             } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จ: ${err.message}`); }
             break;
+        case 'EXECUTE_COMMAND':
+            // Pillar 8: Terminal Authority (Personal Agent Mode)
+            await ctx.reply(`💻 กำลังรันคำสั่ง: \`${data.command}\``);
+            exec(data.command, { timeout: 30000 }, async (error, stdout, stderr) => {
+                if (error) {
+                    await ctx.reply(`❌ คำสั่งขัดข้อง:\n\`\`\`\n${error.message}\n\`\`\``);
+                    return;
+                }
+                const output = stdout || stderr || "(ไม่มีข้อมูลส่งกลับ)";
+                await smartReply(ctx, `🖥️ ผลลัพธ์จากคอมพิวเตอร์:\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
+            });
+            break;
+        case 'READ_FILE':
+            try {
+                const content = fs.readFileSync(data.path, 'utf8');
+                await smartReply(ctx, `📄 เนื้อหาไฟล์ \`${data.path}\`:\n\n${content.substring(0, 3500)}`);
+            } catch (err) { ctx.reply(`❌ อ่านไฟล์ไม่สำเร็จ: ${err.message}`); }
+            break;
         case 'SEARCH_MEMORIES':
+
             try {
                 const snap = await userRef.collection('history').orderBy('timestamp', 'desc').limit(10).get();
                 const past = snap.docs.map(doc => `[Past] User: ${doc.data().user} | Bot: ${doc.data().bot}`).join('\n');
@@ -347,13 +368,15 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         - [ACTION: SET_IDENTITY {"roleDescription": "..."}]
         - [ACTION: WEB_SEARCH {"query": "..."}]
         - [ACTION: SEARCH_MEMORIES {}]
+        - [ACTION: EXECUTE_COMMAND {"command": "..."}]
+        - [ACTION: READ_FILE {"path": "..."}]
 
         [REASONING GUIDELINES]:
-        - หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว หรือบอกให้ "เรียนรู้เพิ่ม" ให้ใช้ [ACTION: SEARCH_MEMORIES] เพื่อดูประวัติการคุยเก่าๆ
-        - หากเจ้านายสั่งให้ "วาดรูป" หรือ "เจนภาพ" ให้ใช้ [ACTION: IMAGE_GEN]. หากต้องการภาพแบบไฟล์ไม่ลดคุณภาพ ให้ใส่ "highRes": true
-        - ก่อนตัดสินใจใช้ SKILL ให้ดูเงื่อนไข "Routing" (Preferred/Avoid) ที่ระบุไว้ในแต่ละสกิล
-        - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
-        - เมื่อได้รับไฟล์ (PDF/Text) ให้วิเคราะห์ตามบทบาทที่คุณเป็นอยู่`;
+        - หากเจ้านายสั่งให้ "ทำงานในคอม", "เปิดโปรแกรม", "เช็คไฟล์" หรือ "รันโค้ด" ให้ใช้ [ACTION: EXECUTE_COMMAND]. (ระวังคำสั่งที่อันตราย!)
+        - หากเจ้านายสั่งให้ "อ่านไฟล์..." ในเครื่อง ให้ใช้ [ACTION: READ_FILE] พร้อมระบุ Path ให้ถูกต้อง
+        - หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES]
+        - หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN]
+        - หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)`;
 
         const response = await axios.post(NVIDIA_API_URL, {
             model: 'moonshotai/kimi-k2-instruct',
