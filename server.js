@@ -10,8 +10,8 @@ const fs = require('fs');
 const { Telegraf } = require('telegraf');
 const pdf = require('pdf-parse');
 const cheerio = require('cheerio');
-const google = require('googlethis');
 const { exec } = require('child_process');
+const { google: googleAuth } = require('googleapis');
 const screenshot = require('screenshot-desktop');
 const si = require('systeminformation');
 const cron = require('node-cron');
@@ -86,9 +86,10 @@ async function getBotMemory(userId) {
         return {
             facts: data.facts || [],
             identity: data.identity || "Stacy (เลขาขี้เล่น)",
-            calendarConnected: !!data.calendarWebhookUrl
+            calendarConnected: !!data.calendarWebhookUrl,
+            googleCalendarId: data.googleCalendarId || null
         };
-    } catch (e) { return { facts: [], identity: "Stacy (เลขาขี้เล่น)", calendarConnected: false }; }
+    } catch (e) { return { facts: [], identity: "Stacy (เลขาขี้เล่น)", calendarConnected: false, googleCalendarId: null }; }
 }
 
 // Utility: Save and Sync functions are defined below for architectural clarity.
@@ -198,28 +199,57 @@ async function handleAgentActions(ctx, action, data, userId) {
                 // Log to terminal for visual feedback on dashboard
                 await logToTerminal(userId, `CALENDAR_SYNC`, `Added: ${eventData.title} at ${eventData.time}`);
 
-                // Sync to External if available
-                const userDoc = await userRef.get();
-                const webhookUrl = userDoc.data()?.calendarWebhookUrl;
-                
-                if (webhookUrl) {
+                // --- NEW: Google Calendar API Sync (Service Account) ---
+                let apiSyncSuccess = false;
+                if (fs.existsSync(path.join(__dirname, 'google-calendar-key.json'))) {
+                    try {
+                        const auth = new googleAuth.auth.GoogleAuth({
+                            keyFile: path.join(__dirname, 'google-calendar-key.json'),
+                            scopes: ['https://www.googleapis.com/auth/calendar.events'],
+                        });
+                        const calendar = googleAuth.calendar({ version: 'v3', auth });
+                        
+                        // We use 'primary' which refers to the service account's calendar, 
+                        // OR we can try to find the user's shared calendar.
+                        // For now, if the user shared their calendar with stacy-helper@...
+                        // the service account needs to know the user's email or 'primary' if it's the owner.
+                        // ACTUALLY: The user shared their calendar with stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com
+                        const userDoc = await userRef.get();
+                        const userData = userDoc.data() || {};
+                        const calendarId = userData.googleCalendarId || 'mocca007x@gmail.com'; 
+                        
+                        await calendar.events.insert({
+                            calendarId: calendarId,
+                            resource: {
+                                summary: eventData.title,
+                                description: eventData.description,
+                                start: { dateTime: eventData.time, timeZone: 'Asia/Bangkok' },
+                                end: { dateTime: new Date(new Date(eventData.time).getTime() + 60 * 60 * 1000).toISOString(), timeZone: 'Asia/Bangkok' },
+                            },
+                        });
+                        apiSyncSuccess = true;
+                        await ctx.reply(`✨ สำเร็จแล้วค่ะเจ้านาย! หนูไขประตูเข้าไปบันทึกนัด "${eventData.title}" ในปฏิทินปั้นมือของเจ้านาย (${calendarId}) เรียบร้อยแล้วนะคะ 🔑📅`);
+                    } catch (apiErr) {
+                        console.error('Core API Sync Error:', apiErr.message);
+                        // Fallback to webhook if API fails or isn't set up yet
+                    }
+                }
+
+                // --- FALLBACK: Google Script Webhook Sync ---
+                if (!apiSyncSuccess && webhookUrl) {
                     try {
                         const response = await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description }, { timeout: 15000 });
                         if (response.data && response.data.status === 'success') {
-                            await ctx.reply(`📅 เรียบร้อยค่ะ! ซิงค์ลง Google Calendar ให้เจ้านายแล้วน้า ✨`);
+                            await ctx.reply(`📅 เรียบร้อยค่ะ! ซิงค์ผ่าน Webhook ลง Google Calendar ให้แล้วน้า ✨`);
                         } else {
                             await ctx.reply(`⚠️ บันทึกข้อมูลแล้ว แต่ Google Script แจ้งว่า: ${JSON.stringify(response.data)}`);
                         }
                     } catch (e) {
-                        console.error('Sync Error:', e.message);
-                        if (e.response && (e.response.status === 401 || e.response.status === 403)) {
-                            await ctx.reply(`❌ เจ้านายขาา Google บล็อกหนูค่ะ! (Error ${e.response.status})\n\n**วิธีแก้ให้เด็ดขาด:**\n1. ไปที่หน้า Google Script\n2. กด **Deploy** > **New Deployment**\n3. ตรง 'Who has access' ต้องเลือกเป็น **'Anyone'** นะคะ\n4. กด Deploy และ Authorize อีกรอบน้า`);
-                        } else {
-                            await ctx.reply(`⚠️ บันทึกแล้ว แต่ส่งไป Google ไม่สำเร็จค่ะ: ${e.message}`);
-                        }
+                        console.error('Webhook Sync Error:', e.message);
+                        await ctx.reply(`⚠️ บันทึกแล้ว แต่ส่งไป Google ไม่สำเร็จค่ะ: ${e.message}`);
                     }
-                } else {
-                    await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลงปฏิทินในหน้า Dashboard เรียบร้อยครับ!\n\n💡 **อย่าลืม:** นำ ID \`${userId}\` ไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard เพื่อดูปฏิทินนะครับ`);
+                } else if (!apiSyncSuccess && !webhookUrl) {
+                    await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลงปฏิทินในหน้า Dashboard เรียบร้อยแล้วค่ะ!\n\n💡 **Tip:** เจ้านายอย่าลืมแชร์ปฏิทินให้หนูที่ \`stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com\` ด้วยนะคะ หนูถึงจะเข้าไปเขียนได้!`);
                 }
             } catch (err) {
                 console.error('Calendar Action Error:', err);
