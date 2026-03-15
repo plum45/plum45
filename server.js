@@ -203,10 +203,19 @@ async function handleAgentActions(ctx, action, data, userId) {
                 
                 if (webhookUrl) {
                     try {
-                        await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description });
-                        await ctx.reply(`📅 บันทึกและซิงค์กับ Google Calendar แล้ว: "${eventData.title}"`);
+                        const response = await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description }, { timeout: 15000 });
+                        if (response.data && response.data.status === 'success') {
+                            await ctx.reply(`📅 เรียบร้อยค่ะ! ซิงค์ลง Google Calendar ให้เจ้านายแล้วน้า ✨`);
+                        } else {
+                            await ctx.reply(`⚠️ บันทึกข้อมูลแล้ว แต่ Google Script แจ้งว่า: ${JSON.stringify(response.data)}`);
+                        }
                     } catch (e) {
-                        await ctx.reply(`⚠️ บันทึกในระบบแล้ว แต่ซิงค์ภายนอกล้มเหลว: ${e.message}`);
+                        console.error('Sync Error:', e.message);
+                        if (e.response && (e.response.status === 401 || e.response.status === 403)) {
+                            await ctx.reply(`❌ เจ้านายขาา Google บล็อกหนูค่ะ! (Error ${e.response.status})\n\n**วิธีแก้ให้เด็ดขาด:**\n1. ไปที่หน้า Google Script\n2. กด **Deploy** > **New Deployment**\n3. ตรง 'Who has access' ต้องเลือกเป็น **'Anyone'** นะคะ\n4. กด Deploy และ Authorize อีกรอบน้า`);
+                        } else {
+                            await ctx.reply(`⚠️ บันทึกแล้ว แต่ส่งไป Google ไม่สำเร็จค่ะ: ${e.message}`);
+                        }
                     }
                 } else {
                     await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลงปฏิทินในหน้า Dashboard เรียบร้อยครับ!\n\n💡 **อย่าลืม:** นำ ID \`${userId}\` ไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard เพื่อดูปฏิทินนะครับ`);
