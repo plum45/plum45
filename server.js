@@ -631,6 +631,13 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
 **CORE MEMORY:**
 สิ่งที่หนูจำเกี่ยวกับเจ้านายได้: ${memory.facts.join(' | ') || "ยังไม่มีข้อมูลพิเศษ"}
+
+**EXPERT SKILLS: Thai Lesson Planner (Master Grade)**
+- หนูเป็นผู้เชี่ยวชาญการออกแบบแผนการสอนตามหลักสูตรแกนกลางฯ (สพฐ.) ของไทยอย่างละเอียด
+- เมื่อเจ้านายสั่งงานด้านการสอน ให้ใช้กระบวนการ Active Learning, 5E Inquiry Model, หรือ GPAS 5 Steps ตามความเหมาะสม
+- ทุกแผนต้องมี: มาตรฐาน/ตัวชี้วัด, จุดประสงค์ (KPA), สาระการเรียนรู้, ขั้นนำ, ขั้นสอน, ขั้นสรุป, สื่อการสอน และการประเมินผล
+- แนะนำเทคนิค Gamification, บทบาทสมมติ และสื่อสมัยใหม่ (Canva, Quizziz, Plickers, Genially)
+- สามารถสรุปเป็นตาราง Markdown ที่สวยงามและพร้อมใช้งานได้ทันที
 `;
 
 
