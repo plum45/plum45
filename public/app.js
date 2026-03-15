@@ -38,7 +38,7 @@ function renderShell() {
 
     <main class="main">
       <header class="topbar">
-        <span class="topbar-t">Qwen Agent <span class="pulse" id="pulse" title="System Live"></span></span>
+        <span class="topbar-t">Stacy 7-Pillar AI <span class="pulse" id="pulse" title="System Live"></span></span>
         <div class="topbar-spacer"></div>
         <button class="topbar-sched" id="openSkills" title="Manage AI Skills">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"/></svg>
@@ -48,9 +48,9 @@ function renderShell() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           <span>Calendar</span>
         </button>
-        <button class="topbar-sched" id="openSched" title="Scheduled tasks">
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-          <span id="schedCount">Schedule</span>
+        <button class="topbar-sched" id="openMemory" title="Identity Memory">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a5 5 0 1 0 5 5 5 5 0 0 0-5-5zM19.21 19.07a8.66 8.66 0 0 0-14.42 0"/></svg>
+          <span>Memory</span>
         </button>
         <button class="topbar-sched" id="toggleTerm" title="System Terminal">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
@@ -142,6 +142,7 @@ function renderShell() {
         <div class="ctrl"><div class="ctrl-row"><label>Telegram ID Sync</label></div><input type="text" id="sTgId" class="ctrl-input" placeholder="Enter your Telegram ID"><p class="ctrl-hint">Enter your ID to sync your Telegram calendar.</p></div>
         <div class="ctrl" style="margin-top:15px; border-top:1px solid var(--border); padding-top:10px;">
           <div class="ctrl-row"><label>🛡️ Architecture Status</label><span id="sysStatus" style="font-size:.7rem;color:var(--text-3)">Checking nodes...</span></div>
+          <button class="ibtn danger" style="width:100%; margin-top:10px; font-size:.75rem" onclick="clearLocalMemory()">🗑️ Clear Local History</button>
         </div>
       </div>
     </div>
@@ -199,6 +200,15 @@ function renderShell() {
       <div class="modal-top"><h2 id="taskDateTitle">Tasks</h2><button class="ibtn" id="closeTask">✕</button></div>
       <div class="modal-bd">
         <div class="task-list" id="taskList"></div>
+      </div>
+    </div>
+  </div>
+  <div class="modal-bg" id="memoryModal">
+    <div class="modal">
+      <div class="modal-top"><h2>🧠 Identity Memory</h2><button class="ibtn" id="closeMemory">✕</button></div>
+      <div class="modal-bd">
+        <p style="font-size:.82rem;color:var(--text-3);margin-bottom:12px">Current identity: <strong id="currentIdentity">Stacy Agent</strong></p>
+        <div id="memoryFacts" class="memory-list"></div>
       </div>
     </div>
   </div>
@@ -279,6 +289,8 @@ function bindAll() {
   $('calPrev').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); });
   $('calNext').addEventListener('click', () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); });
   $('calendarModal').addEventListener('click', e => { if (e.target.id === 'calendarModal') $('calendarModal').classList.remove('vis'); });
+  $('closeMemory').addEventListener('click', () => $('memoryModal').classList.remove('vis'));
+  $('openMemory').addEventListener('click', () => { $('memoryModal').classList.add('vis'); renderMemory(); });
   $('closeTask').addEventListener('click', () => $('taskModal').classList.remove('vis'));
 
   // Artifact
@@ -728,6 +740,26 @@ async function renderCalendar() {
   }
 }
 
+async function renderMemory() {
+    const list = document.getElementById('memoryFacts');
+    const idDisplay = document.getElementById('currentIdentity');
+    list.innerHTML = '<div class="loading-sm">Accessing neurons...</div>';
+    
+    const id = S.settings.tgId || 'me';
+    try {
+        const doc = await db.collection('userActivities').doc(id).get();
+        if (doc.exists) {
+            const data = doc.data();
+            idDisplay.textContent = data.identity || "Stacy AI Agent";
+            const facts = data.facts || [];
+            list.innerHTML = facts.length === 0 ? '<p style="font-size:.8rem;color:var(--text-3)">No memory facts stored yet.</p>' : 
+                facts.map(f => `<div class="memory-fact">🔹 ${esc(f)}</div>`).join('');
+        } else {
+            list.innerHTML = '<p style="font-size:.8rem;color:var(--text-3)">No identity profile found.</p>';
+        }
+    } catch (e) { list.innerHTML = 'Brain scan failed.'; }
+}
+
 function showTasksForDay(day, tasks) {
     if (tasks.length === 0) return;
     document.getElementById('taskModal').classList.add('vis');
@@ -973,4 +1005,32 @@ document.addEventListener('DOMContentLoaded', () => {
   };
   window.addEventListener('resize', vh);
   vh();
+  initSystemHealth();
 });
+
+async function initSystemHealth() {
+    const statusEl = document.getElementById('sysStatus');
+    const pulse = document.getElementById('pulse');
+    
+    const check = async () => {
+        try {
+            const res = await fetch('/api/health');
+            const data = await res.json();
+            if (statusEl) statusEl.textContent = `Online (Uptime: ${Math.floor(data.uptime / 60)}m)`;
+            if (pulse) pulse.style.background = 'var(--green)';
+        } catch (e) {
+            if (statusEl) statusEl.textContent = 'Hardware Node Disconnected';
+            if (pulse) pulse.style.background = 'var(--red)';
+        }
+    };
+    
+    check();
+    setInterval(check, 30000);
+}
+
+window.clearLocalMemory = () => {
+    if (confirm('Clear all local chat history? This cannot be undone.')) {
+        localStorage.removeItem('qwen-v4');
+        location.reload();
+    }
+};

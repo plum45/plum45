@@ -19,13 +19,18 @@ const puppeteer = require('puppeteer');
 
 
 
-// ========== Configuration & Environment ==========
-const PORT = process.env.PORT || 10000;
+// ========== Configuration & Global State ==========
+const CONFIG = {
+    PORT: process.env.PORT || 10000,
+    VERSION: '1.2.5-Premium',
+    SYS_NAME: 'Stacy 7-Pillar AI',
+    NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
+    MODEL: 'moonshotai/kimi-k2-instruct'
+};
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
-const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL || process.env.RENDER_URL;
 const IS_RENDER = !!process.env.RENDER;
+const PORT = CONFIG.PORT;
 
 // ========== Firebase Initialization ==========
 let firebaseStatus = "Disconnected";
@@ -144,13 +149,52 @@ async function handleAgentActions(ctx, action, data, userId) {
 
     switch (action) {
         case 'SAVE_TASK':
-            await userRef.collection('tasks').add({
-                title: data.title,
-                time: data.time || 'Not specified',
-                status: 'pending',
-                createdAt: admin.firestore.FieldValue.serverTimestamp()
-            });
-            await ctx.reply(`✅ จดบันทึกงานให้แล้วครับ: "${data.title}" (${data.time})`);
+        case 'ADD_CALENDAR_EVENT':
+            // Unified Calendar & Task Protocol
+            try {
+                const rawTime = data.startTime || data.time || data.date;
+                let parsedTime = new Date().toISOString(); // Default to now
+                
+                if (rawTime) {
+                    const d = new Date(rawTime);
+                    if (!isNaN(d.getTime())) {
+                        parsedTime = d.toISOString();
+                    }
+                }
+
+                const eventData = {
+                    title: data.title || "Untitled Task",
+                    time: parsedTime,
+                    description: data.description || data.note || '',
+                    status: data.status || 'scheduled',
+                    type: action,
+                    createdAt: admin.firestore.FieldValue.serverTimestamp()
+                };
+
+                // Save to Firestore 'tasks' collection for Web Dashboard
+                const taskRef = await userRef.collection('tasks').add(eventData);
+                
+                // Log to terminal for visual feedback on dashboard
+                await logToTerminal(userId, `CALENDAR_SYNC`, `Added: ${eventData.title} at ${eventData.time}`);
+
+                // Sync to External if available
+                const userDoc = await userRef.get();
+                const webhookUrl = userDoc.data()?.calendarWebhookUrl;
+                
+                if (webhookUrl) {
+                    try {
+                        await axios.post(webhookUrl, { ...data, time: parsedTime });
+                        await ctx.reply(`📅 บันทึกและซิงค์กับ Google Calendar แล้ว: "${eventData.title}"`);
+                    } catch (e) {
+                        await ctx.reply(`⚠️ บันทึกในระบบแล้ว แต่ซิงค์ภายนอกล้มเหลว: ${e.message}`);
+                    }
+                } else {
+                    await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลงปฏิทินในหน้า Dashboard เรียบร้อยครับ!\n\n💡 **อย่าลืม:** นำ ID \`${userId}\` ไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard เพื่อดูปฏิทินนะครับ`);
+                }
+            } catch (err) {
+                console.error('Calendar Action Error:', err);
+                await ctx.reply(`❌ ไม่สามารถบันทึกนัดหมายได้: ${err.message}`);
+            }
             break;
         case 'WORK_LOG':
             await userRef.collection('logs').add({
@@ -162,35 +206,6 @@ async function handleAgentActions(ctx, action, data, userId) {
             break;
         case 'SYNC_USER':
             // Automatically handled by syncUser middleware now, but kept for explicit calls
-            break;
-        case 'ADD_CALENDAR_EVENT':
-            const userDoc = await userRef.get();
-            const userData = userDoc.data();
-            const webhookUrl = userData?.calendarWebhookUrl;
-
-            // Pillar 9: Unified Calendar Sync (Firestore + External Webhook)
-            const eventData = {
-                title: data.title,
-                time: data.startTime || data.time || new Date().toISOString(),
-                description: data.description || '',
-                status: 'scheduled',
-                createdAt: admin.firestore.FieldValue.serverTimestamp()
-            };
-
-            // 1. Save to Firestore so it shows on Web Dashboard
-            await userRef.collection('tasks').add(eventData);
-
-            // 2. Sync to External Google Calendar if webhook available
-            if (webhookUrl) {
-                try {
-                    await axios.post(webhookUrl, data);
-                    await ctx.reply(`📅 ลงนัดหมายและซิงค์กับ Google Calendar เรียบร้อย: "${data.title}"`);
-                } catch (e) {
-                    await ctx.reply(`⚠️ บันทึกลงปฏิทินในระบบแล้ว แต่การซิงค์ภายนอกล้มเหลว: ${e.message}`);
-                }
-            } else {
-                await ctx.reply(`📅 บันทึกลงปฏิทินในระบบเรียบร้อย: "${data.title}" (ยังไม่ได้เชื่อมต่อ Google Calendar ภายนอก)`);
-            }
             break;
 
         case 'IMAGE_GEN':
@@ -411,12 +426,20 @@ async function handleAgentActions(ctx, action, data, userId) {
             } catch (err) { ctx.reply(`❌ อ่านไฟล์ไม่สำเร็จ: ${err.message}`); }
             break;
         case 'SEARCH_MEMORIES':
-
             try {
                 const snap = await userRef.collection('history').orderBy('timestamp', 'desc').limit(10).get();
                 const past = snap.docs.map(doc => `[Past] User: ${doc.data().user} | Bot: ${doc.data().bot}`).join('\n');
                 await ctx.reply(`🧠 ย้อนความจำให้แล้วครับ จากประวัติล่าสุด:\n\n${past || "ยังไม่มีประวัติการคุยครับ"}`);
             } catch (err) { ctx.reply(`❌ ดึงความจำไม่สำเร็จ: ${err.message}`); }
+            break;
+        case 'ADD_MEMORY_FACT':
+            try {
+                await userRef.update({
+                    facts: admin.firestore.FieldValue.arrayUnion(data.fact)
+                });
+                await ctx.reply(`🧠 จดจำความต้องการใหม่ของเจ้านายแล้วครับ: "${data.fact}"`);
+                await logToTerminal(userId, 'MEMORY_UPDATE', `New fact: ${data.fact}`);
+            } catch (err) { ctx.reply(`❌ บันทึกความจำไม่สำเร็จ: ${err.message}`); }
             break;
     }
 }
@@ -426,14 +449,31 @@ async function saveBotMemory(userId, userMsg, botReply) {
     if (!db) return;
     try {
         const userRef = db.collection('userActivities').doc(String(userId));
+        
+        // Save history
         await userRef.collection('history').add({
             user: userMsg,
             bot: botReply,
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
-        if (userMsg.includes('ฉันชื่อ') || userMsg.includes('ผมชื่อ')) {
-            const name = userMsg.split('ชื่อ')[1].trim().split(' ')[0];
-            await userRef.set({ facts: admin.firestore.FieldValue.arrayUnion(`เจ้านายชื่อ: ${name}`) }, { merge: true });
+
+        // Heuristic Fact Extraction (can be improved by LLM later)
+        const factPatterns = [
+            { re: /(?:ฉันชื่อ|ผมชื่อ|เรียกผมว่า)\s*([^\n\s]+)/i, template: "เจ้านายชื่อ: $1" },
+            { re: /(?:ชอบกิน|ของโปรดคือ)\s*([^\n\s]+)/i, template: "เจ้านายชอบกิน: $1" },
+            { re: /(?:แพ้|ไม่กิน)\s*([^\n\s]+)/i, template: "เจ้านายแพ้/ไม่กิน: $1" },
+            { re: /(?:ใช้เบอร์|เบอร์โทร)\s*([\d-]+)/i, template: "เบอร์โทรเจ้านาย: $1" }
+        ];
+
+        for (const p of factPatterns) {
+            const match = userMsg.match(p.re);
+            if (match) {
+                const fact = p.template.replace('$1', match[1]);
+                await userRef.set({ 
+                    facts: admin.firestore.FieldValue.arrayUnion(fact) 
+                }, { merge: true });
+                console.log(`🧠 Stacy Learned: ${fact}`);
+            }
         }
     } catch (e) { console.error('Save Memory Error:', e); }
 }
@@ -543,21 +583,22 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         7. หากเจ้านายถามเรื่องที่เคยคุยกันไปแล้ว ให้ใช้ [ACTION: SEARCH_MEMORIES {}]
         8. หากเจ้านายสั่งให้ "วาดรูป" ให้ใช้ [ACTION: IMAGE_GEN {"prompt": "..."}]
         9. หากขั้นตอนซับซ้อน ให้หยุดถามเจ้านายเพื่อยืนยัน (BTW Side Question approach)
-        10. ทุกนัดหมายที่เพิ่มจะไปปรากฏที่ "Calendar Dashboard" ของเจ้านายทันทีครับ`;
+        10. **CALENDAR RULE**: ทุกครั้งที่ใช้ SAVE_TASK หรือ ADD_CALENDAR_EVENT ต้องส่งค่า "time" เป็นรูปแบบ **ISO 8601 (YYYY-MM-DDTHH:mm:00)** เท่านั้น เพื่อให้ระบบ Dashboard แสดงผลได้ถูกต้อง และนัดหมายจะไปปรากฏที่หน้าปฏิทินทันทีครับ`;
 
 
-        const response = await axios.post(NVIDIA_API_URL, {
-            model: 'moonshotai/kimi-k2-instruct', // Supports large context
+
+        const response = await axios.post(CONFIG.NVIDIA_URL, {
+            model: CONFIG.MODEL,
             messages: [
                 { role: 'system', content: systemPrompt },
                 ...userStore.history.slice(-10),
                 { role: 'user', content: finalInput }
             ],
-            temperature: 0.6,
-            max_tokens: 32768 // Allowing long responses
+            temperature: 0.7,
+            max_tokens: 32768
         }, {
-
-            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' }
+            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+            timeout: 60000 
         });
 
         const reply = response.data.choices[0].message.content;
@@ -583,28 +624,68 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 
 // ========== Bot Handlers ==========
 
+const { Markup } = require('telegraf');
+
 if (bot) {
-    bot.start((ctx) => ctx.reply('👋 สวัสดีครับ! ผม Stacy 7-Pillar AI พร้อมใช้งานระบบ Skill System อัจฉริยะแล้วครับ\n\nพิมพ์ /help เพื่อดูความสามารถใหม่!'));
-    
-    bot.command('status', (ctx) => {
-        ctx.reply(`📡 **Stacy System Status**\n- Backend: Online\n- Firebase: ${firebaseStatus}\n- Mode: Skill Architect Enabled`);
+    const mainMenu = Markup.keyboard([
+        ['📡 Status', '🧠 Who Am I?'],
+        ['🛠️ Skills', '🆔 My ID'],
+        ['📅 Dashboard']
+    ]).resize();
+
+    bot.start((ctx) => {
+        ctx.reply(`✨ **Stacy Premium v1.2.5**\n\nสวัสดีครับเจ้านาย! ผมคือ Stacy 7-Pillar AI พร้อมดูแลทั้งงานเขียนโค้ด, นัดหมาย และระบบอัตโนมัติแล้วครับ\n\n🚀 **เริ่มต้นใช้งาน:**\n- ลองพิมพ์สั่งงานผมได้เลย\n- หรือใช้เมนูด้านล่างเพื่อดูข้อมูลระบบครับ`, mainMenu);
     });
 
-    bot.command('skills', async (ctx) => {
+    bot.help((ctx) => {
+        ctx.reply(`📖 **คู่มือการใช้งาน Stacy AI**\n\n1. **การสั่งงาน:** พิมพ์คุยได้ปกติเหมือนคุยกับคน\n2. **นัดหมาย:** "เตือนฉันซ้อมวิ่งเย็นนี้ 6 โมง" (จะลิ้งค์ไปที่ Dashboard)\n3. **สกิลอัจฉริยะ:** "จดจำว่าถ้าฉันส่งโค้ด Python ให้คุณช่วยรีแฟคเตอร์ให้คลีนขึ้นด้วย"\n4. **ไฟล์:** ส่ง PDF หรือ Text ไฟล์มาให้สรุปได้\n\n💡 **Tip:** นำ ID ไปใส่ในหน้าเว็บเพื่อซิงค์ข้อมูลนัดหมายครับ`);
+    });
+
+    bot.hears('📡 Status', (ctx) => {
+        ctx.reply(`📡 **Stacy System Status**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🔥 **Firebase:** ${firebaseStatus}\n🚀 **Engine:** moonshotai/kimi-k2\n✨ **Version:** 1.2.5-Premium\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
+            [Markup.button.callback('Check Again', 'refresh_status')]
+        ]));
+    });
+
+    bot.hears('🧠 Who Am I?', async (ctx) => {
+        const memory = await getBotMemory(ctx.from.id);
+        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n━━━━━━━━━━━━━━━━━━━━\n"${memory.identity}"\n━━━━━━━━━━━━━━━━━━━━\n\n*(หากต้องการปรับเปลี่ยน บุคลิก สั่งผมได้เลยครับ)*`);
+    });
+
+    bot.hears('🛠️ Skills', async (ctx) => {
         const snap = await db.collection('userActivities').doc(String(ctx.from.id)).collection('skills').get();
-        if (snap.empty) return ctx.reply('🛠️ ยังไม่มีสกิลที่ติดตั้งครับ ลองติดตั้งด้วยคำแนะนำทางเทคนิคที่คุณส่งมาสิครับ!');
-        let text = "🛠️ **คลังสกิลของคุณ:**\n";
+        if (snap.empty) return ctx.reply('🛠️ **ยังไม่มีสกิลที่ติดตั้งครับ**\nลองส่งชุดคำสั่งที่อยากให้ผมทำเป็นประจำมาสิครับ!');
+        let text = "🛠️ **คลังสกิลของคุณ:**\n━━━━━━━━━━━━━━━━━━━━\n";
         snap.forEach(doc => text += `🔹 **${doc.id}**: ${doc.data().description}\n`);
         ctx.reply(text);
     });
 
-    bot.command('whoami', async (ctx) => {
-        const memory = await getBotMemory(ctx.from.id);
-        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n"${memory.identity}"\n\n(หากต้องการให้ผมเป็นอย่างอื่น สั่งผมได้เลยครับ เช่น "ต่อจากนี้ให้คุณเป็น...")`);
+    bot.hears('🆔 My ID', (ctx) => {
+        ctx.reply(`🆔 **ID ของเจ้านายคือ:**\n\n\`${ctx.from.id}\`\n\nนำไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard นะครับ!`);
     });
 
+    bot.hears('📅 Dashboard', (ctx) => {
+        ctx.reply(`🌐 **เข้าสู่หน้า Dashboard**\n\nจัดการนัดหมาย, ดูรันไทม์ และระบบเมมโมรี่ได้ทางเว็บเลยครับ:`, Markup.inlineKeyboard([
+            [Markup.button.url('Open Dashboard', 'https://stacy-ai.vercel.app')]
+        ]));
+    });
+
+    bot.command('status', (ctx) => {
+        ctx.reply(`📡 **Stacy System Status**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🔥 **Firebase:** ${firebaseStatus}\n🚀 **Engine:** moonshotai/kimi-k2\n✨ **Version:** 1.2.5-Premium\n━━━━━━━━━━━━━━━━━━━━`);
+    });
+    bot.command('skills', async (ctx) => {
+        const snap = await db.collection('userActivities').doc(String(ctx.from.id)).collection('skills').get();
+        if (snap.empty) return ctx.reply('🛠️ **ยังไม่มีสกิลที่ติดตั้งครับ**');
+        let text = "🛠️ **คลังสกิลของคุณ:**\n";
+        snap.forEach(doc => text += `🔹 **${doc.id}**: ${doc.data().description}\n`);
+        ctx.reply(text);
+    });
+    bot.command('whoami', async (ctx) => {
+        const memory = await getBotMemory(ctx.from.id);
+        ctx.reply(`🧠 **ตัวตนปัจจุบันของผม:**\n"${memory.identity}"`);
+    });
     bot.command('myid', (ctx) => {
-        ctx.reply(`🆔 **ID ของเจ้านายคือ:** \`${ctx.from.id}\`\n\nนำเลขนี้ไปใส่ในช่อง "Telegram ID Sync" ในหน้า Dashboard เพื่อดูปฏิทินและข้อมูลอื่นๆ นะครับ!`);
+        ctx.reply(`🆔 **ID ของเจ้านายคือ:** \`${ctx.from.id}\``);
     });
 
 
@@ -684,15 +765,24 @@ if (bot) {
         console.error(`🔥 Telegram Global Error [${ctx.updateType}]:`, err);
         ctx.reply('🔴 เกิดข้อผิดพลาดร้ายแรงที่ระบบบอทครับ ผมกำลังแจ้งเตือนทีมวิศวกร (หรือเจ้านาย) ให้ตรวจสอบให้ครับ');
     });
-
-    bot.launch()
-        .then(() => console.log("🤖 Bot Polling Started (Local)"))
-        .catch(err => console.error("❌ Bot Launch Failed:", err));
 }
 
 // ========== Web Server Routes ==========
 
-app.get('/', (res) => res.send('Stacy AI is Active'));
+app.get('/', (req, res) => res.json({ 
+    status: 'online', 
+    name: CONFIG.SYS_NAME,
+    version: CONFIG.VERSION,
+    firebase: firebaseStatus 
+}));
+
+app.get('/api/health', (req, res) => {
+    res.json({
+        uptime: process.uptime(),
+        memory: process.memoryUsage(),
+        timestamp: new Date().toISOString()
+    });
+});
 
 app.post('/api/telegram-webhook', async (req, res) => {
     if (bot) {
@@ -703,11 +793,22 @@ app.post('/api/telegram-webhook', async (req, res) => {
     if (!res.writableEnded) res.status(200).send('OK');
 });
 
+// ========== Housekeeping & Heartbeat ==========
+cron.schedule('0 * * * *', () => {
+    console.log('💓 System Heartbeat: Node is healthy');
+});
+
+// ========== Global Error Bridge ==========
+process.on('unhandledRejection', (reason, promise) => {
+    console.error('🔥 Critical Unhandled Rejection:', reason);
+});
+
 // ========== Start Server ==========
 app.listen(PORT, () => {
-    console.log(`🚀 Stacy running on port ${PORT}`);
+    console.log(`🚀 Stacy Premium v${CONFIG.VERSION} running on port ${PORT}`);
     if (bot && !IS_RENDER) {
-        bot.launch();
-        console.log("🤖 Bot Polling Started (Local)");
+        bot.launch()
+           .then(() => console.log("🤖 Bot Polling Started (Local)"))
+           .catch(err => console.error("❌ Bot Launch Failed:", err));
     }
 });
