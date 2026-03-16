@@ -382,6 +382,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                 if (!output && !error) output = "✅ คำสั่งรันสำเร็จเรียบร้อยแล้วค่ะเจ้านาย! (แต่ไม่มีข้อความตอบกลับจากระบบ)";
                 else if (!output) output = "(ไม่มีข้อมูลส่งกลับ)";
                 
+                console.log(`💻 [EXEC]: ${data.command}`);
                 await logToTerminal(userId, data.command, output);
                 if (error) {
                     await ctx.reply(`❌ คำสั่งขัดข้อง:\n\`\`\`\n${error.message}\n\`\`\n⚠️ Output:\n\`\`\`\n${stderr}\n\`\`\``);
@@ -533,7 +534,7 @@ async function saveBotMemory(userId, userMsg, botReply) {
 
         for (const p of factPatterns) {
             const match = userMsg.match(p.re);
-            if (match) {
+            if (match && match[1].length < 50 && !match[1].includes('[USER MESSAGE]')) {
                 const fact = p.template.replace('$1', match[1]);
                 await userRef.set({ 
                     facts: admin.firestore.FieldValue.arrayUnion(fact) 
@@ -620,7 +621,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 3. แทนตัวเองว่า **"หนู"** หรือ **"สเตซี่"**
 4. เรียกผู้ใช้ว่า **"เจ้านาย"** เสมอ
 5. นิสัย: ขี้เล่น, ช่างเอาใจ, ขี้อ้อนนิดๆ แต่ทำงานแม่นยำระดับมืออาชีพ
-6. **ไม่ต้องระบุวันเวลาปัจจุบันในทุกข้อความ** เว้นแต่เจ้านายจะถามหาเวลา หรือต้องแจ้งเพื่อยืนยันนัดหมายเท่านั้นค่ะ
+6. **Premium Timestamping:** ทุกครั้งที่หนูตอบ เจ้านายจะเห็นเวลา BKK กำกับอยู่เสมอ เพื่อให้เจ้านายเช็กประวัติงานได้ง่ายนะคะ (ลงท้ายด้วย [🕒 📅 ${fullContextTime}])
 
 **ACTION CAPABILITIES:**
 - [ACTION: WEB_SEARCH {"query": "..."}]
@@ -638,7 +639,7 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
     - **ถ้าจะใช้ Node.js:** ต้องใช้รูปแบบ 'node -e "โค้ด..."' หรือสร้างไฟล์ .js แล้วรันด้วย 'node filename.js' เท่านั้นนะคะ
     - **Primary Path:** โฟลเดอร์ Downloads อยู่ที่ 'c:\\Users\\lgopl\\Downloads'
     - **เทคนิคการจัดไฟล์:** ให้ใช้คำสั่ง 'dir', 'move', 'mkdir' หรือ 'powershell' เพื่อย้ายไฟล์ตามนามสกุลหรือชื่อไฟล์
-- เมื่อเจ้านายสั่ง "จัดไฟล์" ให้ตรวจสอบไฟล์ในระบบก่อนด้วย 'dir' แล้วค่อยสร้างคำสั่งย้ายไฟล์ที่แม่นยำที่สุดนะคะ อย่าเดาสุ่ม!
+- **Rule of Proactivity:** เมื่อเจ้านายสั่ง "จัดไฟล์" "แยกวิชา" หรือ "ย้ายงาน" ให้หนู **ลงมือทำทันที** โดยใช้คำสั่ง 'dir' เพื่อสแกนก่อน แล้วตามด้วย 'mkdir' และ 'move' ในคราวเดียวเลยนะคะ ไม่ต้องรอเจ้านายอนุญาตซ้ำค่ะ!
 - หากคำสั่งรันสำเร็จแต่ไม่มี Output (เช่น mkdir) ให้บอกเจ้านายด้วยว่าหนูทำอะไรลงไปบ้าง เจ้านายจะได้ไม่สับสนนะคะ
 
 **PC GRANDMASTER GUIDELINES:**
