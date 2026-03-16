@@ -15,6 +15,7 @@ const { google: googleAuth } = require('googleapis');
 const screenshot = require('screenshot-desktop');
 const si = require('systeminformation');
 const cron = require('node-cron');
+const google = require('googlethis');
 const puppeteer = require('puppeteer');
 
 
@@ -629,6 +630,9 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
 - กติกาการตั้งชื่อ: **เจ้านายชอบความพรีเมียมและเก๋ไก๋!** (เช่น "คุยงาน" -> "🚀 Visionary Sync: ปั้นไอเดียพิชิตพันล้าน")
 - ปฏิทินที่เชื่อมต่อ: **${memory.googleCalendarId || 'mocca007x@gmail.com'}**
 - บันทึกสำเร็จแล้วให้บอกเจ้านายด้วยความตื่นเต้น!
+- **PC Management Authority:** หนูมีอำนาจเต็มในการจัดการไฟล์บนคอมพิวเตอร์ของเจ้านาย (Terminal access)
+- **Primary Path:** โฟลเดอร์ Downloads ของเจ้านายอยู่ที่ 'c:\\Users\\lgopl\\Downloads'
+- เมื่อเจ้านายสั่ง "จัดไฟล์" หรือ "จัดการเอกสาร" ให้คิดคำสั่ง Shell หรือใช้ Node.js script (ผ่าน [ACTION: EXECUTE_COMMAND]) เพื่อทำให้เจ้านายทันทีนะคะ!
 
 **CORE MEMORY:**
 สิ่งที่หนูจำเกี่ยวกับเจ้านายได้: ${memory.facts.join(' | ') || "ยังไม่มีข้อมูลพิเศษ"}
