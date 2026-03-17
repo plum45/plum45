@@ -29,9 +29,9 @@ const CONFIG = {
     SYS_NAME: 'Stacy Architect v1.5.0',
     NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
     NVIDIA_IMAGE_URL: 'https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl',
-    MODEL: 'openai/gpt-oss-120b'
+    MODEL: 'moonshotai/kimi-k2.5'
 };
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
 const IS_RENDER = !!process.env.RENDER;
 
@@ -627,8 +627,10 @@ async function handleAgentActions(ctx, action, data, userId) {
                     finalExecPath = cmd.replace(/(?:^|&&\s*)mkdir\s+(["']?)([^&"']+?)\1/gi, (_, q, folder) => {
                         return `New-Item -ItemType Directory -Force -Path ${q}${folder.trim()}${q}`;
                     });
-                    // Wrap simple commands in powershell to ensure consistency
-                    finalExecPath = `powershell -NoProfile -Command "${finalExecPath.replace(/"/g, '\\"')}"`;
+                    // Wrap simple commands in powershell to ensure consistency (only if NOT on Windows/Local)
+                    if (process.platform !== 'win32' || IS_RENDER) {
+                        finalExecPath = `powershell -NoProfile -Command "${finalExecPath.replace(/"/g, '\\"')}"`;
+                    }
                 }
 
                 // Make command execution completely silent unless it fails or output is requested.
@@ -1123,11 +1125,12 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
                     ...userStore.history.slice(-20),
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 0.7,
-                max_tokens: 32768
+                temperature: 1.0,
+                max_tokens: 16384,
+                chat_template_kwargs: { thinking: true }
             }, {
                 headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-                timeout: 75000 
+                timeout: 300000 
             });
 
             const reply = response.data.choices[0].message.content;
@@ -1154,7 +1157,7 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
         console.error('AI Error:', e.message || e);
         // Smart error messages based on error type
         if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
-            await ctx.reply('⏱️ เจ้านายคะ หนูคิดนานเกินไปแล้วค่ะ (Timeout) รบกวนลองถามใหม่อีกครั้ง หรือลองถามให้สั้นลงหน่อยได้ไหมคะ?');
+            await ctx.reply('⏳ **Reasoning Timeout!**\n\nโมเดล Kimi k2.5 ใช้เวลาคิด (Thinking) นานกว่าปกติค่ะ เนื่องจากกำลังวิเคราะห์ข้อมูลอย่างละเอียด\nหนูขยายเวลารอเป็น 5 นาทีแล้วนะคะ เจ้านายลองสั่งใหม่อีกครั้ง หรือสรุปคำสั่งให้กระชับขึ้นได้ค่ะ 🙏');
         } else if (e.response?.status === 429) {
             await ctx.reply('🚦 API ใช้งานหนักเกินไปค่ะเจ้านาย (Rate Limit) รอสักครู่แล้วลองใหม่นะคะ ☕');
         } else if (e.response?.status === 401) {
@@ -1412,13 +1415,14 @@ ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map
                 { role: 'system', content: systemPrompt },
                 ...messages
             ],
-            temperature: 0.7,
-            max_tokens: 4096,
+            temperature: 1.0,
+            max_tokens: 16384,
+            chat_template_kwargs: { thinking: true },
             stream: true
         }, {
             headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
             responseType: 'stream',
-            timeout: 90000
+            timeout: 300000
         });
 
         let fullContent = "";
