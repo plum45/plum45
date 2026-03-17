@@ -51,12 +51,12 @@ if (!fs.existsSync(docDir)) {
 }
 const PORT = CONFIG.PORT;
 
-// ========== Firebase Initialization ==========
+// ========== Firebase & Global Auth ==========
 let firebaseStatus = "Disconnected";
 let db;
+let serviceAccount = null; // Global for access in actions
 
 try {
-    let serviceAccount;
     if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
         serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
     } else if (process.env.FIREBASE_PRIVATE_KEY) {
@@ -672,13 +672,14 @@ async function handleAgentActions(ctx, action, data, userId) {
                         return;
                     }
 
-                    // [v1.5.3 Silent Success Enforced]
-                    // If not explicitly requested to show, or if it's a "tell-tale" command like echo/print, we stay silent on success.
+                    // [v1.5.4 Silent Success Refined]
+                    // We don't show technical output, but we send a brief '✅ Done' so it's not quiet.
                     if (data.showOutput || (data.silent === false)) {
                         await smartReply(ctx, `🖥️ ผลลัพธ์จากการรัน:\n\`\`\`\n${output.trim().substring(0, 3500)}\n\`\`\``);
-                    } else {
-                        console.log(`✅ [EXEC SUCCESS]: ${cmd} (Silent Mode)`);
+                    } else if (!data.silent) {
+                        await ctx.reply(`✅ ดำเนินการคำสั่งเรียบร้อยแล้วค่ะเจ้านาย!`);
                     }
+                    console.log(`✅ [EXEC SUCCESS]: ${cmd}`);
                 });
             } catch (err) {
                 await ctx.reply(`❌ ระบบเตรียมคำสั่งขัดข้อง: ${err.message}`);
@@ -1774,13 +1775,28 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 // ========== Start Server ==========
-app.listen(PORT, () => {
+app.listen(PORT, async () => {
     console.log(`🚀 Stacy Premium v${CONFIG.VERSION} running on port ${PORT}`);
-    if (bot && !IS_RENDER) {
-        bot.launch()
-           .then(() => console.log("🤖 Bot Polling Started (Local PC Mode)"))
-           .catch(err => console.error("❌ Bot Launch Failed:", err));
-    } else if (bot && IS_RENDER) {
-        console.log("🌐 Stacy is in Webhook Mode (Render Cloud). Ensure your Webhook URL is set!");
+    
+    if (bot) {
+        if (!IS_RENDER) {
+            bot.launch()
+               .then(() => console.log("🤖 Bot Polling Started (Local PC Mode)"))
+               .catch(err => console.error("❌ Bot Launch Failed:", err));
+        } else {
+            // Render Cloud: Auto-configure Webhook
+            const domain = process.env.RENDER_EXTERNAL_HOSTNAME || `${process.env.RENDER_SERVICE_NAME}.onrender.com`;
+            if (domain) {
+                const webhookPath = `/api/telegram-webhook`;
+                const webhookUrl = `https://${domain}${webhookPath}`;
+                try {
+                    await bot.telegram.setWebhook(webhookUrl);
+                    console.log(`🌐 Webhook Set Successfully: ${webhookUrl}`);
+                } catch (e) {
+                    console.error("❌ Failed to set Webhook:", e.message);
+                }
+            }
+            console.log("🌐 Stacy is in Webhook Mode (Render Cloud)");
+        }
     }
 });
