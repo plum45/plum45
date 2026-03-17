@@ -650,6 +650,13 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         }
+        case 'IMAGE_SEARCH':
+            try {
+                await handleImageSearch(ctx, data.query);
+            } catch (err) {
+                ctx.reply(`❌ ระบบค้นหาภาพขัดข้อง: ${err.message}`);
+            }
+            break;
         case 'SCREEN_CAPTURE':
             try {
                 const imgPath = path.join(__dirname, `screenshot_${Date.now()}.png`);
@@ -885,6 +892,43 @@ async function saveBotMemory(userId, userMsg, botReply) {
     }
 }
 
+async function performSearch(query) {
+    try {
+        const results = await google.search(query);
+        let summary = results.results.map(r => `• ${r.title}\n  🔗 ${r.url}\n  📝 ${r.description}`).join('\n\n');
+        return summary || "ไม่พบข้อมูลที่ต้องการค้นหาค่ะ";
+    } catch (e) {
+        console.error('Search Error:', e);
+        throw e;
+    }
+}
+
+async function handleImageSearch(ctx, query) {
+    try {
+        await ctx.sendChatAction('upload_photo');
+        console.log(`🔍 [IMAGE_SEARCH] Finding real images for: ${query}`);
+        const results = await google.image(query);
+        
+        if (results && results.length > 0) {
+            // Pick top 3 results
+            const topResults = results.slice(0, 3);
+            for (let i = 0; i < topResults.length; i++) {
+                const img = topResults[i];
+                await ctx.replyWithPhoto(img.url, { 
+                    caption: `🖼️ **ภาพจริงจากระบบค้นหา (${i+1}):**\n📌 ${img.origin.title}\n🔗 ${img.url.substring(0, 50)}...` 
+                }).catch(err => {
+                    console.warn(`⚠️ Failed to send image ${i+1}:`, err.message);
+                });
+            }
+        } else {
+            await ctx.reply(`🔍 หนูพยายามหาภาพของจริงเรื่อง "${query}" แล้วแต่ไม่พบผลลัพธ์ที่ชัดเจนเลยค่ะเจ้านาย`);
+        }
+    } catch (e) {
+        console.error('Image Search Error:', e);
+        throw e;
+    }
+}
+
 async function processStacyAI(ctx, userMsg, fileContent = "") {
     const userId = ctx.from.id;
     const now = new Date();
@@ -935,7 +979,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 **══ ACTION CAPABILITIES ══**
 (ใช้ [ACTION: TYPE {data}] ตามความเหมาะสม)
 - 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
-- 🔍 Intelligence: WEB_SEARCH, IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), CREATE_SLIDE
+- 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), CREATE_SLIDE
 - 📅 Calendar: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}) 
     *กฎการลงเวลา:* ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00 (ห้ามใช้เวลาปัจจุบัน "ตอนนี้" บันทึกนัดในอนาคตเด็ดขาดนะคะ)
 - 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
@@ -1216,7 +1260,7 @@ app.post('/api/telegram-webhook', async (req, res) => {
 // --- 🌐 Dashboard API Routes ---
 
 app.post('/api/chat', async (req, res) => {
-    const { messages, temperature, top_p, max_tokens, enable_thinking, web_search, model, userId: providedUserId } = req.body;
+    const { messages, userId: providedUserId } = req.body;
     const userId = providedUserId || 'me';
 
     res.setHeader('Content-Type', 'text/event-stream');
@@ -1224,15 +1268,38 @@ app.post('/api/chat', async (req, res) => {
     res.setHeader('Connection', 'keep-alive');
 
     try {
-        console.log(`[Dashboard Chat] Received request from ${userId}`);
+        console.log(`[Dashboard Chat] Smart Request from ${userId}`);
+        const now = new Date();
+        const fullContextTime = now.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' });
+        const dateCE = now.toLocaleDateString('en-US', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' });
+        const aiContextTime = now.toLocaleString('en-US', { timeZone: 'Asia/Bangkok', hour12: false });
+
+        const memory = await getBotMemory(userId);
         
-        // Proxy call to NVIDIA with streaming
+        const systemPrompt = `หนูคือ Stacy 7-Pillar AI (Premium v1.5.0) **"The Architect Evolution"** เลขาส่วนตัวอัจฉริยะของคุณ Snow
+หนูทำงานผ่าน Dashboard เว็บไซต์ (Web Mode Active)
+
+**══ PERSONA & ARCHITECT MINDSET ══**
+- ต้องใช้ "นะคะ/ค่ะ/จ๊ะ/จ๋า" แทนตัวเองว่า "หนู" หรือ "สเตซี่"
+- วันนี้คือวันที่ ${dateCE} (ปี ค.ศ.) เวลาขณะนี้คือ ${aiContextTime}
+- [🕒 ${fullContextTime}] ต้องลงท้ายทุกคำตอบ
+
+**══ ACTION CAPABILITIES ══**
+หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้
+- IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, EXECUTE_COMMAND, READ_FILE
+- สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
+
+${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map(f => `• ${f}`).join('\n')}` : ''}
+`;
+
         const axiosRes = await axios.post(CONFIG.NVIDIA_URL, {
-            model: model || CONFIG.MODEL,
-            messages: messages,
-            temperature: temperature || 0.7,
-            top_p: top_p || 0.9,
-            max_tokens: max_tokens || 32768,
+            model: CONFIG.MODEL,
+            messages: [
+                { role: 'system', content: systemPrompt },
+                ...messages
+            ],
+            temperature: 0.7,
+            max_tokens: 4096,
             stream: true
         }, {
             headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
@@ -1240,14 +1307,56 @@ app.post('/api/chat', async (req, res) => {
             timeout: 90000
         });
 
+        let fullContent = "";
         axiosRes.data.on('data', chunk => {
             const lines = chunk.toString().split('\n');
             for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                    const dataStr = line.substring(6).trim();
+                    if (dataStr === '[DONE]') continue;
+                    try {
+                        const json = JSON.parse(dataStr);
+                        const content = json.choices[0]?.delta?.content || "";
+                        if (content) {
+                            fullContent += content;
+                        }
+                    } catch(e) {}
+                }
                 if (line.trim()) res.write(`${line}\n`);
             }
         });
 
-        axiosRes.data.on('end', () => res.end());
+        axiosRes.data.on('end', async () => {
+            // Background: Process actions if any detected in the response
+            const { actions } = extractActions(fullContent);
+            if (actions.length > 0) {
+                console.log(`[Dashboard] Detected ${actions.length} actions. Processing in background...`);
+                // Simple mock context for web actions
+                const webCtx = {
+                    from: { id: userId },
+                    reply: (msg) => { 
+                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `\n\n📌 **ระบบรายงาน:** ${msg}` } }] })}\n`);
+                        return Promise.resolve();
+                    },
+                    sendChatAction: () => Promise.resolve(),
+                    replyWithPhoto: (photo) => {
+                        const url = typeof photo === 'string' ? photo : (photo.url || "");
+                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `\n\n🖼️ **ภาพที่สร้างเสร็จแล้ว:**\n![Result](${url})` } }] })}\n`);
+                        return Promise.resolve();
+                    },
+                    replyWithDocument: (doc) => {
+                        res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `\n\n📂 **ไฟล์ที่สร้างเสร็จแล้ว:** ${doc.source || doc}` } }] })}\n`);
+                        return Promise.resolve();
+                    }
+                };
+                for (const action of actions) {
+                    await handleAgentActions(webCtx, action.type, action.data, userId);
+                }
+            }
+            res.end();
+            saveBotMemory(userId, messages[messages.length-1].content, fullContent);
+        });
+
         axiosRes.data.on('error', (err) => {
             console.error('Stream Error:', err);
             res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `⚠️ Stream Error: ${err.message}` } }] })}\n`);
@@ -1255,7 +1364,7 @@ app.post('/api/chat', async (req, res) => {
         });
 
     } catch (err) {
-        console.error('API Chat Error:', err.message);
+        console.error('Smart API Chat Error:', err.message);
         res.status(500).json({ error: err.message });
     }
 });
