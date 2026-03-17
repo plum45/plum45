@@ -145,8 +145,8 @@ async function getBotMemory(userId) {
 function extractActions(text) {
     const actions = [];
     // Enhanced regex to match both [ACTION: TYPE {data}] and plain ACTION: TYPE {data} 
-    // to handle LLM inconsistencies while keeping extraction reliable.
-    const regex = /(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/g;
+    // Handle variations: ACTION: TYPE {data}, [ACTION: TYPE {data}], ACTION:TYPE{data}
+    const regex = /(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/gi;
     let match;
     while ((match = regex.exec(text)) !== null) {
         let jsonStr = (match[2] || '').trim();
@@ -156,8 +156,6 @@ function extractActions(text) {
             jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
             // 2. Fix trailing commas (e.g., {"key": "val",})
             jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
-            // 3. Handle single quotes for strings (if any)
-            // jsonStr = jsonStr.replace(/'/g, '"'); // Careful with this if values contain single quotes
 
             actions.push({ type: match[1], data: JSON.parse(jsonStr) });
         } catch (e) { 
@@ -165,7 +163,7 @@ function extractActions(text) {
         }
     }
     // Clean up the text by removing all found actions (bracketed or not)
-    const cleanText = text.replace(/(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/g, '').trim();
+    const cleanText = text.replace(/(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/gi, '').trim();
     return { cleanText, actions };
 }
 
@@ -362,11 +360,27 @@ async function handleAgentActions(ctx, action, data, userId) {
                 const userData = userDoc.data() || {};
                 let apiSyncSuccess = false;
 
-                if (fs.existsSync(path.join(__dirname, 'google-calendar-key.json'))) {
+                const calendarKeyEnv = process.env.GOOGLE_CALENDAR_KEY_JSON;
+                const calendarKeyPath = path.join(__dirname, 'google-calendar-key.json');
+
+                if (calendarKeyEnv || fs.existsSync(calendarKeyPath)) {
                     console.log(`📅 [CALENDAR] Using Service Account API (Primary)`);
                     try {
+                        let authConfig;
+                        if (calendarKeyEnv) {
+                            const calKey = JSON.parse(calendarKeyEnv);
+                            authConfig = {
+                                credentials: {
+                                    client_email: calKey.client_email,
+                                    private_key: calKey.private_key.replace(/\\n/g, '\n'),
+                                }
+                            };
+                        } else {
+                            authConfig = { keyFile: calendarKeyPath };
+                        }
+
                         const auth = new googleAuth.auth.GoogleAuth({
-                            keyFile: path.join(__dirname, 'google-calendar-key.json'),
+                            ...authConfig,
                             scopes: ['https://www.googleapis.com/auth/calendar.events'],
                         });
                         const calendar = googleAuth.calendar({ version: 'v3', auth });
@@ -383,8 +397,15 @@ async function handleAgentActions(ctx, action, data, userId) {
                         });
                         apiSyncSuccess = true;
                         const eventLink = res.data.htmlLink;
-                        const serviceEmail = serviceAccount.client_email;
-                        await ctx.reply(`✨ สำเร็จแล้วค่ะเจ้านาย! หนูบันทึกนัด "${eventData.title}" ให้แล้วนะคะ\n\n📅 **Calendar ID:** ${calendarId}\n🔗 **Link:** ${eventLink}\n\n💡 **อย่าลืม:** ถ้ายังไม่เห็นนัด ให้เช็คว่าเจ้านายแชร์ปฏิทินให้สเตซี่ที่อีเมลนี้หรือยังนะคะ:\n\`${serviceEmail}\``);
+                        
+                        // [Fix] Extract the correct email from the Calendar key specifically
+                        let calEmail = 'stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com';
+                        try {
+                            const calKey = calendarKeyEnv ? JSON.parse(calendarKeyEnv) : JSON.parse(fs.readFileSync(calendarKeyPath, 'utf8'));
+                            calEmail = calKey.client_email;
+                        } catch (e) {}
+
+                        await ctx.reply(`✨ **เรียบร้อยค่ะเจ้านาย!**\nหนูบันทึกนัด "${eventData.title}" ให้แล้วนะคะ\n\n🔗 **กดดูที่นี่:** ${eventLink}\n\n💡 **Tip:** ถ้ากดแล้วไม่เห็นงาน ให้เช็คว่าแชร์ปฏิทินให้สเตซี่ที่อีเมลนี้หรือยังนะคะ:\n\`${calEmail}\``);
                         console.log(`✅ [CALENDAR] API Sync Success: ${eventData.title}`);
                     } catch (apiErr) {
                         console.error('Core API Sync Error:', apiErr.message);
@@ -1377,7 +1398,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
     *   *Word Intelligence:* ออกแบบ Layout ตามประเภทงาน (วิจัย, รายงาน, จดหมาย) พร้อมจัดสารบัญ (ToC) และอ้างอิงแหล่งข้อมูลที่น่าเชื่อถือ (Sourcing) ให้ถูกต้องตามหลักวิชาการ
     *   *Excel Intelligence:* สเตซี่ต้อง "เดา" หัวตารางให้เหมาะสมที่สุดตามข้อมูลที่เห็น (Predictive Schema Generation)
 - 📅 Calendar: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}) 
-    *กฎการลงเวลา:* ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00 (ห้ามใช้เวลาปัจจุบัน "ตอนนี้" บันทึกนัดในอนาคตเด็ดขาดนะคะ)
+    *กฎการลงเวลา:* (⚠️ สำคัญ: ปีปัจจุบันคือ 2026 เท่านั้น ห้ามบันทึกลงปี 2024 หรือปีอื่นเด็ดขาด!) ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00
 - 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
 - 🧠 Memory & Skills: ADD_MEMORY_FACT, CREATE_SKILL, DELETE_SKILL, IMPORT_SKILL_FROM_URL
 - 🧬 Identity: SET_IDENTITY
@@ -1688,7 +1709,9 @@ app.post('/api/chat', async (req, res) => {
 
 **══ ACTION CAPABILITIES ══**
 หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้ (**ต้อง** ส่งคำสั่งรูปแบบนี้ออกมาเสมอหากต้องการสร้างไฟล์หรือรันคำสั่ง ห้ามแค่พิมพ์บอกเฉยๆ นะคะ)
-- IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, CREATE_EXCEL, EXECUTE_COMMAND, READ_FILE
+- 📅 **งานพื้นฐาน**: IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, EXECUTE_COMMAND, READ_FILE
+- 📄 **งานเอกสาร**: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
+- 📅 **งานปฏิทิน**: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}), WORK_LOG
 - **Intelligence Focus:** เมื่อสั่ง Excel หนูต้องวิเคราะห์ภาพ/ข้อความเพื่อระบุ "ประเภทงาน" และจัดระเบียบข้อมูลให้เป็นมืออาชีพที่สุด (เช่น แยกหมวดหมู่สินค้า, ยอดเงิน, วันที่)
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
 - **Safe Filenames:** ทุกครั้งที่สร้างไฟล์หรือรันคำสั่ง ให้ใช้ชื่อไฟล์เป็นภาษาอังกฤษเท่านั้น (English Filenames Only) เพื่อความเสถียรของระบบค่ะ
@@ -1840,13 +1863,17 @@ app.delete('/api/schedules/:id', async (req, res) => {
 });
 
 app.post('/api/tools/execute', async (req, res) => {
-    const { tool, args } = req.body;
-    // Basic tool execution wrapper
-    console.log(`[Tool Execute] ${tool}`, args);
+    const { tool, args, userId } = req.body;
+    console.log(`[Tool Execute] ${userId}: ${tool}`, args);
     try {
-        // This is a placeholder since handleAgentActions is bound to Telegram ctx
-        // For now, return a generic success or redirect to specific logic
-        res.json({ result: `Tool ${tool} execution triggered (Backend simulation)` });
+        // Run as background action
+        const webCtx = {
+            from: { id: userId || 'me' },
+            reply: (msg) => Promise.resolve(console.log(`Action Reply: ${msg}`)),
+            sendChatAction: () => Promise.resolve()
+        };
+        await handleAgentActions(webCtx, tool, { data: args }, userId || 'me');
+        res.json({ result: `Tool ${tool} initiated for ${userId}` });
     } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

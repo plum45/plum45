@@ -185,13 +185,9 @@ function renderShell() {
 
   <div class="modal-bg" id="calendarModal">
     <div class="modal modal-lg">
-      <div class="modal-top">
-        <h2 id="calMonthTitle">📅 Calendar</h2>
-        <div style="display:flex; gap:8px">
-          <button class="ibtn" id="calPrev">◀</button>
-          <button class="ibtn" id="calNext">▶</button>
-          <button class="ibtn" id="closeCalendar">✕</button>
-        </div>
+      <div class="modal-top" style="border-bottom:none; padding-bottom:0">
+        <h2 id="calMonthTitle" style="width:100%"></h2>
+        <button class="ibtn" id="closeCalendar" style="position:absolute; top:12px; right:12px">✕</button>
       </div>
       <div class="modal-bd">
         <div class="cal-grid" id="calGrid"></div>
@@ -298,8 +294,6 @@ function bindAll() {
   // Calendar
   safeBind('openCalendar', 'click', () => { $('calendarModal').classList.add('vis'); renderCalendar(); });
   safeBind('closeCalendar', 'click', () => $('calendarModal').classList.remove('vis'));
-  safeBind('calPrev', 'click', () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); });
-  safeBind('calNext', 'click', () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); });
   if ($('calendarModal')) $('calendarModal').addEventListener('click', e => { if (e.target.id === 'calendarModal') $('calendarModal').classList.remove('vis'); });
   
   // Memory
@@ -739,14 +733,43 @@ async function renderCalendar() {
 
   const year = currentMonth.getFullYear();
   const month = currentMonth.getMonth();
-  const idStr = (S.settings.tgId || '').trim() || 'none';
-  monthTitle.innerHTML = `<span>${new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric' }).format(currentMonth)}</span><br><small style="font-size:0.6rem; color:var(--accent); font-weight:400;">Syncing ID: ${idStr} (${taskCache.length} tasks)</small>`;
+  
+  // Thai Localization Helpers
+  const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+  const thaiDaysLong = ["อาทิตย์", "จันทร์", "อังคาร", "พุธ", "พฤหัสบดี", "ศุกร์", "เสาร์"];
+  const thaiDaysShort = ["อา.", "จ.", "อ.", "พ.", "พฤ.", "ศ.", "ส."];
+  
+  const isSelectedMonthToday = today.getMonth() === month && today.getFullYear() === year;
+  const displayDay = isSelectedMonthToday ? today.getDate() : 1;
+  const displayWeekday = isSelectedMonthToday ? thaiDaysLong[today.getDay()] : thaiDaysLong[new Date(year, month, 1).getDay()];
+
+  // Premium Header Implementation matches screenshot exactly
+  monthTitle.innerHTML = `
+    <div class="cal-header-premium">
+        <div class="cal-nav">
+            <div style="display:flex; gap:12px; margin-right:24px">
+              <button class="ibtn" id="calPrevInside" style="font-size:1.5rem">‹</button>
+              <button class="ibtn" id="calNextInside" style="font-size:1.5rem">›</button>
+            </div>
+            <div class="cal-title-large">${displayDay} ${thaiMonths[month]} ${year}</div>
+        </div>
+        <div class="cal-day-detail">
+            <div class="cal-weekday-thai" style="color:var(--text-3); letter-spacing:1px">${displayWeekday}</div>
+            <div class="cal-day-number">${displayDay}</div>
+        </div>
+    </div>
+  `;
+  
+  // Re-bind internal buttons since we just innerHTML-ed them
+  document.getElementById('calPrevInside').onclick = () => { currentMonth.setMonth(currentMonth.getMonth() - 1); renderCalendar(); };
+  document.getElementById('calNextInside').onclick = () => { currentMonth.setMonth(currentMonth.getMonth() + 1); renderCalendar(); };
+
 
   const firstDay = new Date(year, month, 1).getDay();
   const lastDate = new Date(year, month + 1, 0).getDate();
 
-  // Weekdays
-  ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].forEach(d => {
+  // Weekdays (Thai Short)
+  thaiDaysShort.forEach(d => {
     const el = document.createElement('div'); el.className = 'cal-day head'; el.textContent = d; grid.appendChild(el);
   });
 
@@ -774,7 +797,6 @@ async function renderCalendar() {
 
     el.innerHTML = `<span>${d}</span>`;
     if (dayTasks.length > 0) {
-        const dot = document.createElement('div'); dot.className = 'cal-dot'; el.appendChild(dot);
         el.classList.add('has-task');
     }
 
@@ -805,14 +827,20 @@ async function renderMemory() {
 
 function showTasksForDay(day, tasks) {
     if (tasks.length === 0) return;
+    
+    const thaiMonths = ["มกราคม", "กุมภาพันธ์", "มีนาคม", "เมษายน", "พฤษภาคม", "มิถุนายน", "กรกฎาคม", "สิงหาคม", "กันยายน", "ตุลาคม", "พฤศจิกายน", "ธันวาคม"];
+    const month = currentMonth.getMonth();
+    const year = currentMonth.getFullYear();
+    
     document.getElementById('taskModal').classList.add('vis');
-    document.getElementById('taskDateTitle').textContent = `Tasks for ${day} ${document.getElementById('calMonthTitle').textContent}`;
+    document.getElementById('taskDateTitle').innerHTML = `<span style="color:var(--accent)">${day}</span> ${thaiMonths[month]} ${year}`;
+    
     const list = document.getElementById('taskList');
     list.innerHTML = tasks.map(t => `
         <div class="task-card">
-            <div class="task-time">${new Date(t.time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</div>
+            <div class="task-time">${new Date(t.time).toLocaleTimeString('th-TH', {hour: '2-digit', minute:'2-digit', hour12: false})} น.</div>
             <div class="task-title">${esc(t.title)}</div>
-            <div class="task-status ${t.status}">${t.status}</div>
+            <div class="task-status ${t.status || 'pending'}">${t.status || 'pending'}</div>
         </div>
     `).join('');
 }
@@ -890,6 +918,7 @@ async function streamResp(chat) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         messages,
+        userId: S.settings.tgId, // Crucial: Send the ID to fetch correct profile/webhook
         temperature: S.settings.temp,
         top_p: S.settings.topP,
         max_tokens: S.settings.maxTok,
@@ -965,7 +994,7 @@ async function streamResp(chat) {
           const r = await fetch('/api/tools/execute', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ tool: tc.tool, args: tc.args })
+            body: JSON.stringify({ tool: tc.tool, args: tc.args, userId: S.settings.tgId })
           });
           const d = await r.json();
           toolResults.push(`[Tool: ${tc.tool}] ${d.result || d.error || 'No result'}`);
