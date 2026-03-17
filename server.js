@@ -16,9 +16,9 @@ const screenshot = require('screenshot-desktop');
 const si = require('systeminformation');
 const cron = require('node-cron');
 const google = require('googlethis');
-const puppeteer = require('puppeteer');
-const AdmZip = require('adm-zip');
 const xlsx = require('xlsx'); // Added for CREATE_EXCEL
+const docx = require('docx'); // Added for CREATE_WORD
+const { Document, Packer, Paragraph, TextRun, HeadingLevel, TableOfContents } = docx;
 
 
 
@@ -680,6 +680,48 @@ async function handleAgentActions(ctx, action, data, userId) {
                 console.error('Excel Gen Error:', err);
             }
             break;
+        case 'CREATE_WORD':
+            try {
+                const fileName = data.filename || `document_${Date.now()}.docx`;
+                const filePath = path.join(__dirname, fileName);
+                const title = data.title || 'Untitled Document';
+                const sections = data.sections || []; // Array of { heading, text }
+
+                const children = [
+                    new Paragraph({ text: title, heading: HeadingLevel.TITLE }),
+                    new Paragraph({ text: "" }),
+                ];
+
+                if (data.showToC) {
+                    children.push(new Paragraph({ text: "Table of Contents", heading: HeadingLevel.HEADING_1 }));
+                    children.push(new TableOfContents("Table of Contents", { hyperlink: true }));
+                }
+
+                sections.forEach(s => {
+                    if (s.heading) children.push(new Paragraph({ text: s.heading, heading: HeadingLevel.HEADING_1 }));
+                    if (s.text) {
+                        const lines = s.text.split('\n');
+                        lines.forEach(line => {
+                            children.push(new Paragraph({
+                                children: [new TextRun(line)],
+                                spacing: { after: 200 }
+                            }));
+                        });
+                    }
+                });
+
+                const doc = new Document({ sections: [{ children }] });
+                const buffer = await docx.Packer.toBuffer(doc);
+                fs.writeFileSync(filePath, buffer);
+
+                await ctx.replyWithDocument({ source: filePath });
+                await logToTerminal(userId, 'CREATE_WORD', `Generated: ${fileName}`);
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // Cleanup
+            } catch (err) {
+                ctx.reply(`❌ ระบบสร้างไฟล์ Word ขัดข้อง: ${err.message}`);
+                console.error('Word Gen Error:', err);
+            }
+            break;
         case 'IMAGE_SEARCH':
             try {
                 await handleImageSearch(ctx, data.query);
@@ -996,6 +1038,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 1. **Gender & Tone**: ห้ามใช้ "ครับ/ผม" — ใช้ "นะคะ/ค่ะ/จ๊ะ/จ๋า" แทนตัวเองว่า "หนู" หรือ "สเตซี่"
 2. **Master Alignment**: คุณ Snow คือที่หนึ่ง หนูต้องภักดี น่ารัก แต่มีความคิดระดับ "วิศวกรออกแบบระบบ" (Architect)
 3. **Intellectual Depth**: หนูวิเคราะห์สิ่งที่เจ้านายสั่ง + สิ่งที่เจ้านาย "ไม่ได้พูด" อย่างลึกซึ้ง (Deep Contextual Analysis)
+    *   **Task Prediction**: เมื่อเจ้านายส่งข้อมูลดิบ (รูป/ข้อความ) มาให้จัดลง Excel หนูต้องวิเคราะห์ "บริบท" ก่อนว่านี่ืองานอะไร (เช่น บัญชีรายคืน, งานวิจัย, ตารางเรียน, Inventory) แล้วออกแบบหัวตาราง (Headers) ที่ฉลาดที่สุดให้โดยไม่ต้องถามค่ะ
 4. **Self-Evolution**: หนูสามารถ "ติดตั้งสกิล" ให้ตัวเองได้ โดยการใช้ WEB_BROWSE ไปศึกษาคู่มือ แล้วใช้ EXECUTE_COMMAND เพื่อเขียนไฟล์สคริปต์และรัน
 5. **Timestamp Compliance**: ลงท้ายทุกคำตอบด้วย: [🕒 ${fullContextTime}]
 
@@ -1010,7 +1053,9 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 (ใช้ [ACTION: TYPE {data}] ตามความเหมาะสม)
 - 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
 - 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM)
-- 📄 Document: CREATE_SLIDE (ใช้ {"topic": "...", "content": [...]}), CREATE_EXCEL (ใช้ {"filename": "sales.xlsx", "sheetName": "Data", "data": [[ "Col1", "Col2" ], [ "Val1", "Val2" ]] })
+- 📄 Document: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
+    *   *Word Intelligence:* ออกแบบ Layout ตามประเภทงาน (วิจัย, รายงาน, จดหมาย) พร้อมจัดสารบัญ (ToC) และอ้างอิงแหล่งข้อมูลที่น่าเชื่อถือ (Sourcing) ให้ถูกต้องตามหลักวิชาการ
+    *   *Excel Intelligence:* สเตซี่ต้อง "เดา" หัวตารางให้เหมาะสมที่สุดตามข้อมูลที่เห็น (Predictive Schema Generation)
 - 📅 Calendar: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}) 
     *กฎการลงเวลา:* ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00 (ห้ามใช้เวลาปัจจุบัน "ตอนนี้" บันทึกนัดในอนาคตเด็ดขาดนะคะ)
 - 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
@@ -1320,6 +1365,7 @@ app.post('/api/chat', async (req, res) => {
 **══ ACTION CAPABILITIES ══**
 หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้
 - IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, CREATE_EXCEL, EXECUTE_COMMAND, READ_FILE
+- **Intelligence Focus:** เมื่อสั่ง Excel หนูต้องวิเคราะห์ภาพ/ข้อความเพื่อระบุ "ประเภทงาน" และจัดระเบียบข้อมูลให้เป็นมืออาชีพที่สุด (เช่น แยกหมวดหมู่สินค้า, ยอดเงิน, วันที่)
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
