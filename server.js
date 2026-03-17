@@ -1082,8 +1082,19 @@ async function handleAgentActions(ctx, action, data, userId) {
             break;
         case 'READ_FILE':
             try {
-                const filePath = path.resolve(__dirname, data.path || '');
+                if (!data.path) throw new Error("ระบุชื่อไฟล์ที่ต้องการอ่านด้วยนะคะ");
+                
+                let filePath = path.resolve(__dirname, data.path);
+                // Fallback: If not found in root, check in docDir
+                if (!fs.existsSync(filePath)) {
+                    filePath = path.join(docDir, data.path);
+                }
+
                 if (fs.existsSync(filePath)) {
+                    const stats = fs.statSync(filePath);
+                    if (stats.isDirectory()) {
+                        throw new Error(`"${data.path}" เป็นโฟลเดอร์นะคะ ไม่ใช่ไฟล์ หนูอ่านไม่ได้ค่ะ`);
+                    }
                     const content = fs.readFileSync(filePath, 'utf8');
                     await ctx.reply(`📄 **อ่านไฟล์สำเร็จค่ะ:** \`${data.path}\`\n\n\`\`\`\n${content.substring(0, 3500)}\n\`\`\``);
                 } else {
