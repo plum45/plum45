@@ -21,6 +21,7 @@ const docx = require('docx'); // Added for CREATE_WORD
 const { Document, Packer, Paragraph, TextRun, HeadingLevel, TableOfContents } = docx;
 const puppeteer = require('puppeteer');
 const AdmZip = require('adm-zip');
+const wol = require('wake_on_lan');
 
 
 
@@ -143,24 +144,28 @@ async function getBotMemory(userId) {
 
 function extractActions(text) {
     const actions = [];
-    const regex = /\[\s*ACTION:\s*(\w+)\s*({[\s\S]*?})\s*\]/g;
+    // Enhanced regex to match both [ACTION: TYPE {data}] and plain ACTION: TYPE {data} 
+    // to handle LLM inconsistencies while keeping extraction reliable.
+    const regex = /(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
-        let jsonStr = match[2];
+        let jsonStr = (match[2] || '').trim();
         try {
-            // [Fix] Automatically wrap unquoted keys in double quotes for Llama compatibility
-            // This turns {filename: "..."} into {"filename": "..."}
+            // [Stacy Architect Fix] Robust JSON Normalization for Llama/Qwen models
+            // 1. Wrap unquoted keys in double quotes
             jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
-            
-            // Handle single quotes (if any) and normalize
-            // (Minimal fix for now, mostly targeting the unquoted keys issue seen in logs)
-            
+            // 2. Fix trailing commas (e.g., {"key": "val",})
+            jsonStr = jsonStr.replace(/,\s*([}\]])/g, '$1');
+            // 3. Handle single quotes for strings (if any)
+            // jsonStr = jsonStr.replace(/'/g, '"'); // Careful with this if values contain single quotes
+
             actions.push({ type: match[1], data: JSON.parse(jsonStr) });
         } catch (e) { 
-            console.error('Action Parse Error:', e, 'Fixed JSON:', jsonStr); 
+            console.error('Action Parse Error:', e, 'Raw JSON:', jsonStr); 
         }
     }
-    const cleanText = text.replace(/\[\s*ACTION:[\s\S]*?\]/g, '').trim();
+    // Clean up the text by removing all found actions (bracketed or not)
+    const cleanText = text.replace(/(?:\[\s*)?ACTION:\s*(\w+)\s*({[\s\S]*?})(?:\s*\])?/g, '').trim();
     return { cleanText, actions };
 }
 
@@ -783,8 +788,13 @@ async function handleAgentActions(ctx, action, data, userId) {
             break;
         case 'GET_PC_STATS':
             try {
-                const [cpu, mem, load] = await Promise.all([si.cpu(), si.mem(), si.currentLoad()]);
-                const stats = `🖥️ **PC Status Update**\n- CPU: ${cpu.manufacturer} ${cpu.brand}\n- Load: ${load.currentLoad.toFixed(2)}%\n- RAM: ${(mem.used / 1024/1024/1024).toFixed(2)} / ${(mem.total / 1024/1024/1024).toFixed(2)} GB`;
+                const [cpu, mem, load, battery] = await Promise.all([si.cpu(), si.mem(), si.currentLoad(), si.battery()]);
+                let stats = `💻 **Laptop Status Update**\n- CPU: ${cpu.manufacturer} ${cpu.brand}\n- Load: ${load.currentLoad.toFixed(2)}%\n- RAM: ${(mem.used / 1024/1024/1024).toFixed(2)} / ${(mem.total / 1024/1024/1024).toFixed(2)} GB`;
+                
+                if (battery && battery.hasBattery) {
+                    stats += `\n- 🔋 Battery: ${battery.percent}% (${battery.isCharging ? '⚡ กำลังชาร์จ' : '🔋 ใช้แบตเตอรี่'})\n- ความร้อน: ${battery.type || 'N/A'}`;
+                }
+                
                 await ctx.reply(stats);
                 await logToTerminal(userId, 'GET_PC_STATS', stats);
             } catch (err) { ctx.reply(`❌ ดึงข้อมูลระบบไม่สำเร็จ: ${err.message}`); }
@@ -1105,6 +1115,38 @@ async function handleAgentActions(ctx, action, data, userId) {
                 if (interactBrowser) await interactBrowser.close();
             }
             break;
+        case 'SYSTEM_CONTROL':
+            try {
+                const action = data.action; // 'SHUTDOWN', 'RESTART', 'WAKE'
+                if (!IS_RENDER) {
+                    // LOCAL PC CONTROL
+                    if (action === 'SHUTDOWN') {
+                        await ctx.reply('🛑 รับทราบค่ะเจ้านาย! สเตซี่กำลังดำเนินการปิดเครื่องคอมพิวเตอร์ให้นะคะ... ลาก่อนค่ะ 💤');
+                        exec('shutdown /s /t 10'); // 10s delay to allow message delivery
+                    } else if (action === 'RESTART') {
+                        await ctx.reply('🔄 กำลังรีสตาร์ทเครื่องคอมพิวเตอร์ให้นะคะ แล้วหนูจะรีบกลับมาหาเจ้านายนะคะ! 🚀');
+                        exec('shutdown /r /t 10');
+                    }
+                } else if (IS_RENDER && action === 'WAKE') {
+                    // CLOUD PC WAKE (WOL)
+                    const mac = data.mac || '00:00:00:00:00:00'; // Target's MAC address
+                    const host = data.host || '255.255.255.255'; // Public IP or Broadcast
+                    
+                    await ctx.reply(`📡 สเตซี่ (Cloud) กำลังส่งสัญญาณ "Magic Packet" ไปปลุกคอมพิวเตอร์ที่บ้านให้นะคะ!\n📍 MAC: ${mac}\n📍 Host: ${host}`);
+                    
+                    wol.wake(mac, { address: host, port: 9 }, (err) => {
+                        if (err) ctx.reply(`❌ ปลุกไม่สำเร็จ: ${err.message}`);
+                        else ctx.reply('✅ ส่งสัญญาณปลุกเรียบร้อยแล้วค่ะ! รอสักครู่ให้คอมพิวเตอร์บูตขึ้นมานะคะ 💤 → ⚡');
+                    });
+                } else if (IS_RENDER && (action === 'SHUTDOWN' || action === 'RESTART')) {
+                    ctx.reply('⚠️ เจ้านายสั่งปิดเครื่องจากฝั่ง Cloud นะคะ หนูทำได้แค่ควบคุม "คอมพิวเตอร์ที่บ้าน" (Local) เท่านั้นค่ะ ไม่สามารถปิด Render ได้นะคะจ๊ะ');
+                }
+                
+                await logToTerminal(userId, 'SYSTEM_CONTROL', action);
+            } catch (err) {
+                ctx.reply(`❌ ควบคุมระบบขัดข้อง: ${err.message}`);
+            }
+            break;
     }
 }
 
@@ -1229,8 +1271,9 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 ⑤ **PROACTIVE POLISH**: มอบผลลัพธ์ที่สมบูรณ์แบบ (เช่น สไลด์สวยๆ หรือ Link เว็บไซต์) และเสนอ "ก้าวต่อไป"
 
 **══ ACTION CAPABILITIES ══**
-(เมื่อต้องการสร้างไฟล์, รันคำสั่ง, หรือเข้าถึงระบบ **ต้อง** ส่งคำสั่งในรูปแบบ [ACTION: TYPE {data}] ออกมาด้วยเสมอ ห้ามแค่พิมพ์บอกว่าจะทำเด็ดขาด!)
-- 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
+(เมื่อต้องการสร้างไฟล์, รันคำสั่ง, หรือเข้าถึงระบบ **ต้อง** ส่งคำสั่งในรูปแบบ [ACTION: TYPE {data}] ออกมาด้วยเสมอ ห้ามลืมเครื่องหมาย [ ] และห้ามแค่พิมพ์บอกว่าจะทำเด็ดขาด!)
+- 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE, SYSTEM_CONTROL (ใช้ {"action": "SHUTDOWN|RESTART|WAKE", "mac": "...", "host": "..."})
+    *Wake Guide:* ถ้าสั่ง "เปิดคอม" จาก Telegram ตอนที่คอมปิดอยู่ (โดยที่ Stacy รันอยู่บน Render) หนูจะใช้ SYSTEM_CONTROL {action: "WAKE"} เพื่อส่ง Magic Packet ไปปลุกคอมที่บ้านค่ะ (เจ้านายต้องระบุ MAC Address ในความจำหนูไว้นะคะ)
 - 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), BROWSER_INTERACT (ควบคุมเบราว์เซอร์แบบหลายขั้นตอน เช่น {"action": "click|type|wait|evaluate|hover|screenshot", "selector": "...", "value": "...", "urgent": true})
     *Live Visual Mode:* เมื่อรัน BROWSER_INTERACT สเตซี่จะแสดง "ความเคลื่อนไหว" เป็นระยะโดยการส่งรูป Screenshot และแก้ไขข้อความสถานะให้เห็นกันสดๆ ค่ะ (เหมาะสำหรับงานดีไซน์ Figma หรือกรอกฟอร์มยาวๆ)
 - 📄 Document: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
@@ -1257,11 +1300,12 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: Llama-3.3-70B
-- 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
+- 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Laptop ของคุณ Snow'})
 - 📂 Root: ${__dirname}
 - 📂 Archive: ${docDir} (Professional Storage)
 - 🎨 Art Engine: NVIDIA NIM (Active Primary)
 - 👤 Master & Priority: คุณ Snow (Top Priority)
+- 💡 Device Context: เจ้านายทำงานผ่าน Laptop (ต้องใส่ใจเรื่องแบตเตอรี่และโหมดประหยัดพลังงาน)
 `;
 
         // Typing Heartbeat (Stops after 5s normally, so we refresh it)
@@ -1722,9 +1766,11 @@ process.on('unhandledRejection', (reason, promise) => {
 // ========== Start Server ==========
 app.listen(PORT, () => {
     console.log(`🚀 Stacy Premium v${CONFIG.VERSION} running on port ${PORT}`);
-    if (bot) {
+    if (bot && !IS_RENDER) {
         bot.launch()
-           .then(() => console.log(`🤖 Bot Polling Started (${IS_RENDER ? 'Render Cloud' : 'Local PC'})`))
+           .then(() => console.log("🤖 Bot Polling Started (Local PC Mode)"))
            .catch(err => console.error("❌ Bot Launch Failed:", err));
+    } else if (bot && IS_RENDER) {
+        console.log("🌐 Stacy is in Webhook Mode (Render Cloud). Ensure your Webhook URL is set!");
     }
 });
