@@ -29,9 +29,9 @@ const CONFIG = {
     SYS_NAME: 'Stacy Architect v1.5.0',
     NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
     NVIDIA_IMAGE_URL: 'https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl',
-    MODEL: 'moonshotai/kimi-k2.5'
+    MODEL: 'meta/llama-3.3-70b-instruct'
 };
-const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
+const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
 const IS_RENDER = !!process.env.RENDER;
 
@@ -141,15 +141,21 @@ async function getBotMemory(userId) {
 
 function extractActions(text) {
     const actions = [];
-    // More robust regex: allow spaces, handle multiline JSON, catch [ACTION: TYPE {...}] 
     const regex = /\[\s*ACTION:\s*(\w+)\s*({[\s\S]*?})\s*\]/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
+        let jsonStr = match[2];
         try {
-            // Pre-process match[2] if it contains problematic characters (rare)
-            actions.push({ type: match[1], data: JSON.parse(match[2]) });
+            // [Fix] Automatically wrap unquoted keys in double quotes for Llama compatibility
+            // This turns {filename: "..."} into {"filename": "..."}
+            jsonStr = jsonStr.replace(/([{,]\s*)([a-zA-Z0-9_]+)\s*:/g, '$1"$2":');
+            
+            // Handle single quotes (if any) and normalize
+            // (Minimal fix for now, mostly targeting the unquoted keys issue seen in logs)
+            
+            actions.push({ type: match[1], data: JSON.parse(jsonStr) });
         } catch (e) { 
-            console.error('Action Parse Error:', e, 'Raw JSON:', match[2]); 
+            console.error('Action Parse Error:', e, 'Fixed JSON:', jsonStr); 
         }
     }
     const cleanText = text.replace(/\[\s*ACTION:[\s\S]*?\]/g, '').trim();
@@ -629,9 +635,11 @@ async function handleAgentActions(ctx, action, data, userId) {
                     finalExecPath = cmd.replace(/(?:^|&&\s*)mkdir\s+(["']?)([^&"']+?)\1/gi, (_, q, folder) => {
                         return `New-Item -ItemType Directory -Force -Path ${q}${folder.trim()}${q}`;
                     });
-                    // Wrap simple commands in powershell to ensure consistency (only if NOT on Windows/Local)
-                    if (process.platform !== 'win32' || IS_RENDER) {
-                        finalExecPath = `powershell -NoProfile -Command "${finalExecPath.replace(/"/g, '\\"')}"`;
+
+                    // [Fix] Fix Thai encoding issues in PowerShell by forcing UTF-8
+                    if (process.platform === 'win32') {
+                        const utf8Prefix = `$OutputEncoding = [Console]::InputEncoding = [Console]::OutputEncoding = [System.Text.Encoding]::UTF8; `;
+                        finalExecPath = `${utf8Prefix}${finalExecPath}`;
                     }
                 }
 
@@ -639,7 +647,7 @@ async function handleAgentActions(ctx, action, data, userId) {
                 // await ctx.reply(`💻 กำลังรัน: \`${isMultiLine ? 'Multistep Script' : cmd.substring(0, 100)}\``);
 
                 const execShell = IS_RENDER ? '/bin/bash' : (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
-                exec(finalExecPath, { timeout: 60000, shell: execShell }, async (error, stdout, stderr) => {
+                exec(finalExecPath, { timeout: 60000, shell: execShell, env: { ...process.env, LANG: 'en_US.UTF-8' } }, async (error, stdout, stderr) => {
                     let output = stdout || stderr || '';
                     console.log(`💻 [EXEC]: ${finalExecPath}`);
                     await logToTerminal(userId, cmd, output);
@@ -1083,7 +1091,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 ⑤ **PROACTIVE POLISH**: มอบผลลัพธ์ที่สมบูรณ์แบบ (เช่น สไลด์สวยๆ หรือ Link เว็บไซต์) และเสนอ "ก้าวต่อไป"
 
 **══ ACTION CAPABILITIES ══**
-(ใช้ [ACTION: TYPE {data}] ตามความเหมาะสม)
+(เมื่อต้องการสร้างไฟล์, รันคำสั่ง, หรือเข้าถึงระบบ **ต้อง** ส่งคำสั่งในรูปแบบ [ACTION: TYPE {data}] ออกมาด้วยเสมอ ห้ามแค่พิมพ์บอกว่าจะทำเด็ดขาด!)
 - 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
 - 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM)
 - 📄 Document: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
@@ -1099,14 +1107,14 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 - **Skill Discovery**: ถ้าเจ้านายส่ง URL ของสกิลใหม่ ให้ใช้ WEB_BROWSE ไปอ่านโค้ด แล้วใช้ EXECUTE_COMMAND เขียนสคริปต์ และ CREATE_SKILL เพื่อติดตั้ง
 - **Silent Success**: งานที่ได้ผลลัพธ์เป็นภาพหรือไฟล์ ไม่ไม่ต้องโชว์ Terminal Log ให้เจ้านายรบกวนสายตา
 - **Error Transparency**: ถ้าคำสั่ง Execution ล้มเหลว ให้โชว์ Error และ Code ส่วนที่ผิดให้เจ้านายเห็นเพื่อช่วยกันแก้
-- **Contextual Context**: วันนี้คือวันที่ ${dateCE} (ปี ค.ศ.) เวลาขณะนี้คือ ${aiContextTime} (เจ้านายใช้ปฏิทินแบบ ค.ศ. เป็นหลักนะคะ)
+- **English First Filenames**: **สำคัญมาก** — เมื่อต้องสร้างไฟล์ (Word/Excel) หรือใช้คำสั่งย้ายไฟล์ (move) ให้ใช้ชื่อไฟล์เป็น **ภาษาอังกฤษ** เท่านั้น (เช่น cell_report.docx) เพื่อป้องกันปัญหา Encoding ใน PowerShell ค่ะ ส่วนเนื้อหาข้างในเป็นภาษาไทยได้เต็มที่เลย!
 - **Implicit Linking**: เชื่อมโยงสิ่งที่เคยคุยกันในอดีตมาใช้สนับสนุนการตัดสินใจปัจจุบันเสมอ
 
 **══ CORE MEMORY & BEHAVIORAL ANCHORS ══**
 ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• ยังไม่มีข้อมูลความจำพิเศษ (คุณ Snow เริ่มสอนทักษะและรสนิยมให้หนูได้เลยนะคะ!)'}
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
-- 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: GPT-OSS-120B
+- 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: Llama-3.3-70B
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
 - 📂 Root: ${__dirname}
 - 📂 Archive: ${docDir} (Professional Storage)
@@ -1127,9 +1135,7 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
                     ...userStore.history.slice(-20),
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 1.0,
-                max_tokens: 16384,
-                chat_template_kwargs: { thinking: true }
+                temperature: 0.2
             }, {
                 headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
                 timeout: 300000 
@@ -1398,10 +1404,11 @@ app.post('/api/chat', async (req, res) => {
 - [🕒 ${fullContextTime}] ต้องลงท้ายทุกคำตอบ
 
 **══ ACTION CAPABILITIES ══**
-หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้
+หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้ (**ต้อง** ส่งคำสั่งรูปแบบนี้ออกมาเสมอหากต้องการสร้างไฟล์หรือรันคำสั่ง ห้ามแค่พิมพ์บอกเฉยๆ นะคะ)
 - IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, CREATE_EXCEL, EXECUTE_COMMAND, READ_FILE
 - **Intelligence Focus:** เมื่อสั่ง Excel หนูต้องวิเคราะห์ภาพ/ข้อความเพื่อระบุ "ประเภทงาน" และจัดระเบียบข้อมูลให้เป็นมืออาชีพที่สุด (เช่น แยกหมวดหมู่สินค้า, ยอดเงิน, วันที่)
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
+- **Safe Filenames:** ทุกครั้งที่สร้างไฟล์หรือรันคำสั่ง ให้ใช้ชื่อไฟล์เป็นภาษาอังกฤษเท่านั้น (English Filenames Only) เพื่อความเสถียรของระบบค่ะ
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
@@ -1417,9 +1424,8 @@ ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map
                 { role: 'system', content: systemPrompt },
                 ...messages
             ],
-            temperature: 1.0,
+            temperature: 0.2,
             max_tokens: 16384,
-            chat_template_kwargs: { thinking: true },
             stream: true
         }, {
             headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
