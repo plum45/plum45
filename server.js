@@ -34,6 +34,12 @@ const CONFIG = {
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
 const IS_RENDER = !!process.env.RENDER;
+
+// Ensure Documents folder exists for professional local organization
+const docDir = path.join(__dirname, 'Documents');
+if (!fs.existsSync(docDir)) {
+    fs.mkdirSync(docDir, { recursive: true });
+}
 const PORT = CONFIG.PORT;
 
 // ========== Firebase Initialization ==========
@@ -127,11 +133,12 @@ async function getBotMemory(userId) {
 
 function extractActions(text) {
     const actions = [];
-    // More robust regex: allow spaces after [ and before ]
+    // More robust regex: allow spaces, handle multiline JSON, catch [ACTION: TYPE {...}] 
     const regex = /\[\s*ACTION:\s*(\w+)\s*({[\s\S]*?})\s*\]/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
         try {
+            // Pre-process match[2] if it contains problematic characters (rare)
             actions.push({ type: match[1], data: JSON.parse(match[2]) });
         } catch (e) { 
             console.error('Action Parse Error:', e, 'Raw JSON:', match[2]); 
@@ -655,14 +662,13 @@ async function handleAgentActions(ctx, action, data, userId) {
         case 'CREATE_EXCEL':
             try {
                 const fileName = data.filename || `report_${Date.now()}.xlsx`;
-                const filePath = path.join(__dirname, fileName);
+                const filePath = path.join(docDir, fileName); // Save to Documents folder
                 const wb = xlsx.utils.book_new();
                 
-                // Support for multiple sheets
                 const sheets = data.sheets || [{ 
                     name: data.sheetName || 'Sheet1', 
                     data: data.data || [['No Data']],
-                    merges: data.merges || [] // Format: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }]
+                    merges: data.merges || []
                 }];
 
                 sheets.forEach(s => {
@@ -679,17 +685,17 @@ async function handleAgentActions(ctx, action, data, userId) {
                 xlsx.writeFile(wb, filePath);
 
                 await ctx.replyWithDocument({ source: filePath });
-                await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${fileName} with ${sheets.length} sheets`);
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${filePath}`);
+                // Only delete if on Cloud. Keep on Local PC for Master's usage.
+                if (IS_RENDER && fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch (err) {
                 ctx.reply(`❌ ระบบสร้างไฟล์ Excel ขัดข้อง: ${err.message}`);
-                console.error('Excel Gen Error:', err);
             }
             break;
         case 'CREATE_WORD':
             try {
                 const fileName = data.filename || `document_${Date.now()}.docx`;
-                const filePath = path.join(__dirname, fileName);
+                const filePath = path.join(docDir, fileName); // Save to Documents folder
                 const title = data.title || 'Untitled Document';
                 const sections = data.sections || []; // Array of { heading, text, table }
 
@@ -715,7 +721,6 @@ async function handleAgentActions(ctx, action, data, userId) {
                         });
                     }
                     if (s.table) {
-                        // Advanced: Add Table Support
                         const tableRows = s.table.map(row => {
                             return new docx.TableRow({
                                 children: row.map(cell => new docx.TableCell({
@@ -732,8 +737,9 @@ async function handleAgentActions(ctx, action, data, userId) {
                 fs.writeFileSync(filePath, buffer);
 
                 await ctx.replyWithDocument({ source: filePath });
-                await logToTerminal(userId, 'CREATE_WORD', `Generated: ${fileName}`);
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+                await logToTerminal(userId, 'CREATE_WORD', `Generated: ${filePath}`);
+                // Only delete if on Cloud. Keep on Local PC for Master's usage.
+                if (IS_RENDER && fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch (err) {
                 ctx.reply(`❌ ระบบสร้างไฟล์ Word ขัดข้อง: ${err.message}`);
                 console.error('Word Gen Error:', err);
