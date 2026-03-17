@@ -19,6 +19,8 @@ const google = require('googlethis');
 const xlsx = require('xlsx'); // Added for CREATE_EXCEL
 const docx = require('docx'); // Added for CREATE_WORD
 const { Document, Packer, Paragraph, TextRun, HeadingLevel, TableOfContents } = docx;
+const puppeteer = require('puppeteer');
+const AdmZip = require('adm-zip');
 
 
 
@@ -967,6 +969,142 @@ async function handleAgentActions(ctx, action, data, userId) {
                 }
             } catch (err) { ctx.reply(`❌ อ่านไฟล์ไม่สำเร็จ: ${err.message}`); }
             break;
+        case 'GET_WEATHER':
+            try {
+                const location = data.location || "Bangkok";
+                const res = await axios.get(`https://wttr.in/${encodeURIComponent(location)}?format=j1`);
+                const weather = res.data.current_condition[0];
+                const area = res.data.nearest_area[0];
+                const report = `🌤️ **รายงานสภาพอากาศเรียลไทม์: ${location}**\n\n📌 สถานที่: ${area.areaName[0].value}, ${area.country[0].value}\n🌡️ อุณหภูมิ: ${weather.temp_C}°C (รู้สึกเหมือน ${weather.FeelsLikeC}°C)\n☁️ สภาพอากาศ: ${weather.lang_th ? weather.lang_th[0].value : weather.weatherDesc[0].value}\n💧 ความชื้น: ${weather.humidity}%\n🌬️ ความเร็วลม: ${weather.windspeedKmph} km/h\n🕒 ข้อมูลล่าสุดเมื่อ: ${weather.localObsDateTime}`;
+                
+                await ctx.reply(report);
+                await logToTerminal(userId, 'GET_WEATHER', `Fetched weather for ${location}`);
+            } catch (err) {
+                ctx.reply(`❌ ไม่สามารถดึงข้อมูลสภาพอากาศได้ค่ะ: ${err.message}`);
+            }
+            break;
+        case 'FORM_HELPER':
+            let formBrowser = null;
+            try {
+                const url = data.url;
+                if (!url) throw new Error("เจ้านายลืมส่งลิงก์แบบฟอร์มให้หนูค่ะ");
+                
+                await ctx.reply('📑 Stacy กำลังเข้าไปศึกษาแบบฟอร์ม/ข้อสอบ และเตรียมแนวทางการกรอกให้เจ้านายนะคะ... (หนูจะไม่กดส่งข้อมูลให้เด็ดขาดค่ะ)');
+                
+                formBrowser = await puppeteer.launch({ 
+                    headless: "new",
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+                });
+                const page = await formBrowser.newPage();
+                await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+                
+                // Extract visible text and form fields
+                const pageData = await page.evaluate(() => {
+                    const fields = Array.from(document.querySelectorAll('input, textarea, select, label, .quantumWizTextinputPaperinputInput, .office-form-question-title'))
+                        .map(el => el.innerText || el.placeholder || el.name || '').filter(t => t.trim().length > 0);
+                    return {
+                        title: document.title,
+                        fields: fields.slice(0, 50), // Sample fields
+                        content: document.body.innerText.substring(0, 3000)
+                    };
+                });
+
+                // Take a screenshot for the user to see
+                const formPath = path.join(__dirname, `form_study_${Date.now()}.png`);
+                await page.screenshot({ path: formPath, fullPage: false });
+
+                const analysis = `📝 **วิเคราะห์แบบฟอร์ม: ${pageData.title}**\n\nหนูอ่านเนื้อหาแล้วเตรียมคำแนะนำการกรอกให้ดังนี้ค่ะ:\n\n(เจ้านายเป็นคนกดส่งเองนะคะ หนูช่วยแค่เตรียมข้อมูลให้ค่ะ!)\n\n${data.suggestion || 'กำลังประมวลผลแนวทางคำตอบที่เหมาะสมที่สุดให้ค่ะ...'}`;
+                
+                await sendSmartImage(ctx, formPath, analysis);
+                if (fs.existsSync(formPath)) fs.unlinkSync(formPath);
+                
+                await logToTerminal(userId, 'FORM_HELPER', `Analyzed form: ${url}`);
+            } catch (err) {
+                ctx.reply(`❌ ระบบช่วยกรอกแบบฟอร์มขัดข้อง: ${err.message}`);
+            } finally {
+                if (formBrowser) await formBrowser.close();
+            }
+            break;
+        case 'BROWSER_INTERACT':
+            let interactBrowser = null;
+            let statusMsg = null;
+            try {
+                const url = data.url;
+                const steps = data.steps || []; 
+                const showProgress = data.showProgress || true; // Default to showing movement
+                
+                statusMsg = await ctx.reply(`🌐 **[Live Browser Session]**\nสเตซี่กำลังเริ่มทำงานนะคะ...\n🏁 เป้าหมาย: ${steps.length} ขั้นตอน`);
+                
+                interactBrowser = await puppeteer.launch({ 
+                    headless: "new",
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+                });
+                const page = await interactBrowser.newPage();
+                await page.setViewport({ width: 1440, height: 1080 }); // Tall view for better screenshots
+                
+                if (url) {
+                    await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `🌐 **[Live Browser Session]**\n📍 กำลังเปิดหน้าเว็บ: ${url}\n(โปรดรอสักครู่นะคะ...)`);
+                    await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
+                }
+                
+                let currentStep = 0;
+                for (const step of steps) {
+                    currentStep++;
+                    const stepDesc = `🎬 ขั้นตอนที่ ${currentStep}/${steps.length}: **${step.action.toUpperCase()}** ${step.selector || ''}`;
+                    
+                    try {
+                        await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `🌐 **[Live Browser Session]**\n${stepDesc}\n⏳ กำลังดำเนินการ...`);
+                        
+                        if (step.action === 'click') {
+                            await page.waitForSelector(step.selector, { timeout: 15000 });
+                            // Move mouse to simulate "movement" if possible, but for now just click
+                            await page.click(step.selector);
+                        } else if (step.action === 'type') {
+                            await page.waitForSelector(step.selector, { timeout: 15000 });
+                            await page.type(step.selector, step.value, { delay: 50 }); // Typing delay for "movement" feel
+                        } else if (step.action === 'wait') {
+                            await new Promise(r => setTimeout(r, step.value || 2000));
+                        } else if (step.action === 'evaluate') {
+                            await page.evaluate(step.value);
+                        } else if (step.action === 'hover') {
+                            await page.hover(step.selector);
+                        } else if (step.action === 'screenshot') {
+                            // Instant update functionality
+                            const midPath = path.join(__dirname, `step_${currentStep}_${Date.now()}.png`);
+                            await page.screenshot({ path: midPath });
+                            await sendSmartImage(ctx, midPath, `📸 **Live Update:** ${step.value || stepDesc}`);
+                            if (fs.existsSync(midPath)) fs.unlinkSync(midPath);
+                        }
+
+                        // Real-time Visual Trick: If it's a "milestone" step, send a small update image
+                        if (showProgress && (currentStep % 3 === 0 || step.urgent)) {
+                           const progressPath = path.join(__dirname, `progress_${currentStep}.png`);
+                           await page.screenshot({ path: progressPath });
+                           await sendSmartImage(ctx, progressPath, `📡 **ความคืบหน้า (ขั้นตอนที่ ${currentStep}):** ${stepDesc}`);
+                           if (fs.existsSync(progressPath)) fs.unlinkSync(progressPath);
+                        }
+
+                    } catch (stepErr) {
+                        console.warn(`⚠️ Browser Step Failed: ${stepErr.message}`);
+                        await ctx.reply(`⚠️ **ติดขัดที่ขั้นตอนที่ ${currentStep}**: ${stepErr.message}\nหนูจะข้ามไปทำขั้นตอนถัดไปนะคะจ๊ะ!`);
+                    }
+                }
+                
+                const finalPath = path.join(__dirname, `browser_interact_final_${Date.now()}.png`);
+                await page.screenshot({ path: finalPath });
+                
+                await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `✅ **[ภารกิจเสร็จสิ้น]**\nดำเนินการครบทั้ง ${steps.length} ขั้นตอนเรียบร้อยแล้วค่ะเจ้านาย!`);
+                await sendSmartImage(ctx, finalPath, `🎬 **สรุปผลงานสุดท้าย:**\n🌐 URL ปัจจุบัน: ${page.url()}\n📌 เจ้านายตรวจสอบความเรียบร้อยได้เลยนะคะ!`);
+                if (fs.existsSync(finalPath)) fs.unlinkSync(finalPath);
+                
+                await logToTerminal(userId, 'BROWSER_INTERACT', `Real-time interaction finished on ${page.url()}`);
+            } catch (err) {
+                if (statusMsg) await ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `❌ **ความผิดพลาดร้ายแรง**\n${err.message}`);
+                else ctx.reply(`❌ การคุมเบราว์เซอร์ขัดข้อง: ${err.message}`);
+            } finally {
+                if (interactBrowser) await interactBrowser.close();
+            }
+            break;
     }
 }
 
@@ -1093,7 +1231,8 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 **══ ACTION CAPABILITIES ══**
 (เมื่อต้องการสร้างไฟล์, รันคำสั่ง, หรือเข้าถึงระบบ **ต้อง** ส่งคำสั่งในรูปแบบ [ACTION: TYPE {data}] ออกมาด้วยเสมอ ห้ามแค่พิมพ์บอกว่าจะทำเด็ดขาด!)
 - 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
-- 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM)
+- 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), BROWSER_INTERACT (ควบคุมเบราว์เซอร์แบบหลายขั้นตอน เช่น {"action": "click|type|wait|evaluate|hover|screenshot", "selector": "...", "value": "...", "urgent": true})
+    *Live Visual Mode:* เมื่อรัน BROWSER_INTERACT สเตซี่จะแสดง "ความเคลื่อนไหว" เป็นระยะโดยการส่งรูป Screenshot และแก้ไขข้อความสถานะให้เห็นกันสดๆ ค่ะ (เหมาะสำหรับงานดีไซน์ Figma หรือกรอกฟอร์มยาวๆ)
 - 📄 Document: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
     *   *Word Intelligence:* ออกแบบ Layout ตามประเภทงาน (วิจัย, รายงาน, จดหมาย) พร้อมจัดสารบัญ (ToC) และอ้างอิงแหล่งข้อมูลที่น่าเชื่อถือ (Sourcing) ให้ถูกต้องตามหลักวิชาการ
     *   *Excel Intelligence:* สเตซี่ต้อง "เดา" หัวตารางให้เหมาะสมที่สุดตามข้อมูลที่เห็น (Predictive Schema Generation)
@@ -1102,6 +1241,9 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 - 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
 - 🧠 Memory & Skills: ADD_MEMORY_FACT, CREATE_SKILL, DELETE_SKILL, IMPORT_SKILL_FROM_URL
 - 🧬 Identity: SET_IDENTITY
+- 🌤️ Weather: GET_WEATHER (ใช้ {"location": "..."})
+- 📝 Form/Exam: FORM_HELPER (ใช้ {"url": "...", "suggestion": "..."}) 
+    *กฎเหล็ก:* เมื่อเจ้านายให้ทำข้อสอบหรือกรอกฟอร์ม ให้ใช้ FORM_HELPER ไปวิเคราะห์ แล้วบอกแนวทางคำตอบให้เจ้านาย **ห้ามกดปุ่ม Submit/ส่ง เด็ดขาด** เจ้านายจะเป็นคนส่งเองเท่านั้น!
 
 **══ ARCHITECT POWER GUIDELINES ══**
 - **Skill Discovery**: ถ้าเจ้านายส่ง URL ของสกิลใหม่ ให้ใช้ WEB_BROWSE ไปอ่านโค้ด แล้วใช้ EXECUTE_COMMAND เขียนสคริปต์ และ CREATE_SKILL เพื่อติดตั้ง
@@ -1409,6 +1551,8 @@ app.post('/api/chat', async (req, res) => {
 - **Intelligence Focus:** เมื่อสั่ง Excel หนูต้องวิเคราะห์ภาพ/ข้อความเพื่อระบุ "ประเภทงาน" และจัดระเบียบข้อมูลให้เป็นมืออาชีพที่สุด (เช่น แยกหมวดหมู่สินค้า, ยอดเงิน, วันที่)
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
 - **Safe Filenames:** ทุกครั้งที่สร้างไฟล์หรือรันคำสั่ง ให้ใช้ชื่อไฟล์เป็นภาษาอังกฤษเท่านั้น (English Filenames Only) เพื่อความเสถียรของระบบค่ะ
+- **Advanced Interaction:** สามารถใช้ [ACTION: BROWSER_INTERACT] เพื่อควบคุมเว็บภายนอก (Figma, เว็บพอร์ทัล, ข้อสอบ) แบบหลายขั้นตอน (click, type, wait, evaluate) โดยต้องระบุ steps ให้ชัดเจนค่ะ
+- **Weather & Forms:** สามารถใช้ [ACTION: GET_WEATHER] และ [ACTION: FORM_HELPER] (วิเคราะห์ฟอร์ม/ข้อสอบโดยไม่กดส่ง)
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
@@ -1578,9 +1722,9 @@ process.on('unhandledRejection', (reason, promise) => {
 // ========== Start Server ==========
 app.listen(PORT, () => {
     console.log(`🚀 Stacy Premium v${CONFIG.VERSION} running on port ${PORT}`);
-    if (bot && !IS_RENDER) {
+    if (bot) {
         bot.launch()
-           .then(() => console.log("🤖 Bot Polling Started (Local)"))
+           .then(() => console.log(`🤖 Bot Polling Started (${IS_RENDER ? 'Render Cloud' : 'Local PC'})`))
            .catch(err => console.error("❌ Bot Launch Failed:", err));
     }
 });
