@@ -11,3 +11,8 @@ test-ddg-lite.js
 test-ddg.js
 out.html
 out.json
+google-calendar-key.json
+*.png
+*.webp
+temp_task_*
+nano_banana_*

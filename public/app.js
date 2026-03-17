@@ -52,6 +52,10 @@ function renderShell() {
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a5 5 0 1 0 5 5 5 5 0 0 0-5-5zM19.21 19.07a8.66 8.66 0 0 0-14.42 0"/></svg>
           <span>Memory</span>
         </button>
+        <button class="topbar-sched" id="openSched" title="Automated tasks">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+          <span id="schedCount">Schedule</span>
+        </button>
         <button class="topbar-sched" id="toggleTerm" title="System Terminal">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
           <span>Terminal</span>

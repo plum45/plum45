@@ -1,60 +1,41 @@
 const axios = require('axios');
+const fs = require('fs');
+require('dotenv').config();
 
-const NVIDIA_API_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
-const NVIDIA_API_KEY = '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';
-const MODEL = 'qwen/qwen3.5-122b-a10b';
+const API_KEY = process.env.NVIDIA_API_KEY;
 
-async function testModel() {
-    console.log(`Testing model: ${MODEL}`);
-    
-    const payloads = [
-        {
-            name: "Basic request",
-            data: {
-                model: MODEL,
-                messages: [{ role: 'user', content: 'Say hello' }],
-                max_tokens: 100
+async function testNvidiaImage() {
+    console.log('Testing NVIDIA NIM Image Generation...');
+    try {
+        const response = await axios.post(
+            'https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl',
+            {
+                text_prompts: [{ text: "a beautiful sunset over a futuristic city", weight: 1 }],
+                cfg_scale: 7,
+                seed: 0,
+                steps: 30,
+                width: 1024,
+                height: 1024
+            },
+            {
+                headers: {
+                    "Accept": "application/json",
+                    "Authorization": `Bearer ${API_KEY}`
+                }
             }
-        },
-        {
-            name: "Request with enable_thinking: true",
-            data: {
-                model: MODEL,
-                messages: [{ role: 'user', content: 'How are you?' }],
-                max_tokens: 100,
-                chat_template_kwargs: { enable_thinking: true }
-            }
-        },
-        {
-            name: "Request with enable_thinking: false",
-            data: {
-                model: MODEL,
-                messages: [{ role: 'user', content: 'What is 2+2?' }],
-                max_tokens: 100,
-                chat_template_kwargs: { enable_thinking: false }
-            }
+        );
+
+        if (response.data && response.data.artifacts && response.data.artifacts.length > 0) {
+            const base64Data = response.data.artifacts[0].base64;
+            const buffer = Buffer.from(base64Data, 'base64');
+            fs.writeFileSync('test_nvidia.png', buffer);
+            console.log('✅ Success! Image saved to test_nvidia.png');
+        } else {
+            console.log('❌ Unexpected response format:', response.data);
         }
-    ];
-
-    for (const p of payloads) {
-        console.log(`\n--- Running: ${p.name} ---`);
-        try {
-            const res = await axios.post(NVIDIA_API_URL, p.data, {
-                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Accept': 'application/json' },
-                timeout: 10000
-            });
-            console.log("Success! Status:", res.status);
-            console.log("Response:", res.data.choices[0].message.content);
-        } catch (e) {
-            console.error("Failed!");
-            if (e.response) {
-                console.error("Status:", e.response.status);
-                console.error("Data:", JSON.stringify(e.response.data, null, 2));
-            } else {
-                console.error("Message:", e.message);
-            }
-        }
+    } catch (e) {
+        console.error('❌ Error:', e.response ? e.response.data : e.message);
     }
 }
 
-testModel();
+testNvidiaImage();

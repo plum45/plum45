@@ -17,16 +17,18 @@ const si = require('systeminformation');
 const cron = require('node-cron');
 const google = require('googlethis');
 const puppeteer = require('puppeteer');
+const AdmZip = require('adm-zip');
 
 
 
 // ========== Configuration & Global State ==========
 const CONFIG = {
     PORT: process.env.PORT || 10000,
-    VERSION: '1.2.5-Premium',
-    SYS_NAME: 'Stacy 7-Pillar AI',
+    VERSION: '1.5.0-ARCHITECT',
+    SYS_NAME: 'Stacy Architect v1.5.0',
     NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
-    MODEL: 'moonshotai/kimi-k2-instruct'
+    NVIDIA_IMAGE_URL: 'https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl',
+    MODEL: 'openai/gpt-oss-120b'
 };
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || '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';
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
@@ -60,6 +62,7 @@ try {
             credential: admin.credential.cert(serviceAccount)
         });
         db = admin.firestore();
+        db.settings({ ignoreUndefinedProperties: true }); // Prevent crashes on undefined values
         firebaseStatus = "🟢 Connected (Ready)";
         console.log("🔥 Firebase Initialized Successfully");
     }
@@ -78,6 +81,31 @@ const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN) : null;
 const tgContexts = new Map(); // Store conversation history
 
 // ========== Core Logic Pillars & Actions ==========
+
+// syncUser: Upserts user profile to Firestore on every message (called by all bot handlers)
+async function syncUser(ctx) {
+    if (!db || !ctx.from) return;
+    try {
+        const u = ctx.from;
+        const ref = db.collection('userActivities').doc(String(u.id));
+        const snap = await ref.get();
+        const updateData = {
+            username: u.username || null,
+            firstName: u.first_name || null,
+            lastName: u.last_name || null,
+            lastSeen: admin.firestore.FieldValue.serverTimestamp(),
+        };
+        if (!snap.exists) {
+            updateData.firstSeen = admin.firestore.FieldValue.serverTimestamp();
+            await ref.set(updateData);
+        } else {
+            await ref.update(updateData);
+        }
+    } catch (e) {
+        console.warn('[syncUser] Non-critical error:', e.message);
+        // Non-fatal — don't throw, bot continues
+    }
+}
 
 async function getBotMemory(userId) {
     if (!db) return { facts: [], identity: "Stacy (เลขาขี้เล่น)", calendarConnected: false };
@@ -144,16 +172,21 @@ async function smartReply(ctx, text) {
     }
     if (chunk) await ctx.reply(chunk);
 }
-async function sendSmartImage(ctx, source, caption) {
+async function sendSmartImage(ctx, source, caption, filename = 'stacy_capture.png') {
     try {
         // Try sending as photo first (prettier)
         await ctx.replyWithPhoto({ source }, { caption });
     } catch (err) {
-        if (err.description && err.description.includes('PHOTO_INVALID_DIMENSIONS')) {
-            console.log('⚠️ Photo dimensions invalid, falling back to document mode...');
-            await ctx.replyWithDocument({ source, filename: 'capture.png' }, { 
-                caption: caption + '\n\n(หมายเหตุ: ส่งเป็นไฟล์เนื่องจากขนาดภาพไม่รองรับโหมดรูปภาพครับ)' 
-            });
+        const errDesc = err.description || err.message || '';
+        if (errDesc.includes('PHOTO_INVALID_DIMENSIONS') || errDesc.includes('IMAGE_PROCESS_FAILED')) {
+            console.log(`⚠️ Image delivery issue (${errDesc}), falling back to document mode...`);
+            try {
+                await ctx.replyWithDocument({ source, filename: filename }, { 
+                    caption: caption + '\n\n(หมายเหตุ: ส่งเป็นไฟล์เนื่องจากระบบ Telegram ไม่สามารถประมวลผลรูปภาพปกติได้ในขณะนี้ครับ)' 
+                });
+            } catch (docErr) {
+                throw docErr; // Re-throw to be handled by caller fallback
+            }
         } else {
             throw err;
         }
@@ -171,17 +204,25 @@ async function handleAgentActions(ctx, action, data, userId) {
             // Unified Calendar & Task Protocol
             try {
                 const rawTime = data.startTime || data.time || data.date;
-                let parsedTime = new Date().toISOString(); // Default to now
+                let parsedTime = null; 
                 
                 if (rawTime) {
-                    const d = new Date(rawTime);
+                    let timeToParse = rawTime;
+                    if (/^\d{4}-\d{2}-\d{2}$/.test(rawTime)) timeToParse += 'T09:00:00';
+                    const d = new Date(timeToParse);
                     if (!isNaN(d.getTime())) {
                         parsedTime = d.toISOString();
                     } else {
-                        // Attempt fallback for strings like "2026-03-15 10:00"
-                        const d2 = new Date(rawTime.replace(' ', 'T') + 'Z');
+                        const d2 = new Date(timeToParse.replace(' ', 'T'));
                         if (!isNaN(d2.getTime())) parsedTime = d2.toISOString();
                     }
+                }
+                
+                if (!parsedTime) {
+                    const tomorrow = new Date();
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    tomorrow.setHours(9, 0, 0, 0);
+                    parsedTime = tomorrow.toISOString();
                 }
 
                 const eventData = {
@@ -200,23 +241,20 @@ async function handleAgentActions(ctx, action, data, userId) {
                 // Log to terminal for visual feedback on dashboard
                 await logToTerminal(userId, `CALENDAR_SYNC`, `Added: ${eventData.title} at ${eventData.time}`);
 
-                // --- NEW: Google Calendar API Sync (Service Account) ---
+                // --- 🔐 PROTECTED BLOCK: DO NOT MODIFY UNLESS INSTRUCTED BY MR. SNOW ---
+                // --- 🛡️ PRIMARY: Google Calendar API Sync (Service Account) ---
+                const userDoc = await userRef.get();
+                const userData = userDoc.data() || {};
                 let apiSyncSuccess = false;
+
                 if (fs.existsSync(path.join(__dirname, 'google-calendar-key.json'))) {
+                    console.log(`📅 [CALENDAR] Using Service Account API (Primary)`);
                     try {
                         const auth = new googleAuth.auth.GoogleAuth({
                             keyFile: path.join(__dirname, 'google-calendar-key.json'),
                             scopes: ['https://www.googleapis.com/auth/calendar.events'],
                         });
                         const calendar = googleAuth.calendar({ version: 'v3', auth });
-                        
-                        // We use 'primary' which refers to the service account's calendar, 
-                        // OR we can try to find the user's shared calendar.
-                        // For now, if the user shared their calendar with stacy-helper@...
-                        // the service account needs to know the user's email or 'primary' if it's the owner.
-                        // ACTUALLY: The user shared their calendar with stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com
-                        const userDoc = await userRef.get();
-                        const userData = userDoc.data() || {};
                         const calendarId = userData.googleCalendarId || 'mocca007x@gmail.com'; 
                         
                         await calendar.events.insert({
@@ -229,31 +267,42 @@ async function handleAgentActions(ctx, action, data, userId) {
                             },
                         });
                         apiSyncSuccess = true;
-                        await ctx.reply(`✨ สำเร็จแล้วค่ะเจ้านาย! หนูไขประตูเข้าไปบันทึกนัด "${eventData.title}" ในปฏิทินปั้นมือของเจ้านาย (${calendarId}) เรียบร้อยแล้วนะคะ 🔑📅`);
+                        await ctx.reply(`✨ สำเร็จแล้วค่ะเจ้านาย! หนูใช้ระบบ Service Account API บันทึกนัด "${eventData.title}" ให้เรียบร้อยแล้วนะคะ (${calendarId}) 🔑📅`);
+                        console.log(`✅ [CALENDAR] API Sync Success: ${eventData.title}`);
                     } catch (apiErr) {
                         console.error('Core API Sync Error:', apiErr.message);
-                        // Fallback to webhook if API fails or isn't set up yet
                     }
                 }
 
-                // --- FALLBACK: Google Script Webhook Sync ---
-                const userDocForWebhook = await userRef.get();
-                const webhookUrl = userDocForWebhook.data()?.calendarWebhookUrl;
-
-                if (!apiSyncSuccess && webhookUrl) {
-                    try {
-                        const response = await axios.post(webhookUrl, { action: 'ADD_CALENDAR', title: eventData.title, start: eventData.time, description: eventData.description }, { timeout: 15000 });
-                        if (response.data && response.data.status === 'success') {
-                            await ctx.reply(`📅 เรียบร้อยค่ะ! ซิงค์ผ่าน Webhook ลง Google Calendar ให้แล้วน้า ✨`);
-                        } else {
-                            await ctx.reply(`⚠️ บันทึกข้อมูลแล้ว แต่ Google Script แจ้งว่า: ${JSON.stringify(response.data)}`);
+                // --- 🚀 SECONDARY: Google Script Webhook Sync (Fallback) ---
+                if (!apiSyncSuccess) {
+                    const webhookUrl = userData.calendarWebhookUrl;
+                    if (webhookUrl) {
+                        console.log(`📅 [CALENDAR] API Failed, Falling back to Webhook: ${webhookUrl}`);
+                        try {
+                            const response = await axios.post(webhookUrl, { 
+                                action: 'ADD_CALENDAR', 
+                                title: eventData.title, 
+                                start: eventData.time, 
+                                description: eventData.description 
+                            }, { timeout: 15000 });
+                            
+                            if (response.data && response.data.status === 'success') {
+                                await ctx.reply(`📅 เรียบร้อยค่ะ! บันทึกผ่านระบบ Webhook สำรองลง Google Calendar ให้แล้วน้า ✨`);
+                                console.log(`✅ [CALENDAR] Webhook Fallback Success: ${eventData.title}`);
+                            } else {
+                                await ctx.reply(`⚠️ บันทึกข้อมูลแล้ว แต่ระบบสำรองขัดข้องค่ะ: ${JSON.stringify(response.data)}`);
+                            }
+                        } catch (e) {
+                            console.error('Webhook Fallback Error:', e.message);
+                            await ctx.reply(`⚠️ บันทึกนัดหมายลง Dashboard แล้ว แต่การซิงค์ลง Google ล้มเหลวทั้งสองระบบเลยค่ะ`);
                         }
-                    } catch (e) {
-                        console.error('Webhook Sync Error:', e.message);
-                        await ctx.reply(`⚠️ บันทึกแล้ว แต่ส่งไป Google ไม่สำเร็จค่ะ: ${e.message}`);
+                    } else if (fs.existsSync(path.join(__dirname, 'google-calendar-key.json'))) {
+                         // API was tried and failed, and no webhook
+                         await ctx.reply(`⚠️ บันทึกนัดหมายลง Dashboard แล้ว แต่ซิงค์ลง Google ไม่สำเร็จนะคะเจ้านาย`);
+                    } else {
+                        await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลง Dashboard เรียบร้อยแล้วค่ะ!\n\n💡 อย่าลืมแชร์ปฏิทินให้หนูด้วยนะคะ!`);
                     }
-                } else if (!apiSyncSuccess && !webhookUrl) {
-                    await ctx.reply(`✅ บันทึกนัดหมาย "${eventData.title}" ลงปฏิทินในหน้า Dashboard เรียบร้อยแล้วค่ะ!\n\n💡 **Tip:** เจ้านายอย่าลืมแชร์ปฏิทินให้หนูที่ \`stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com\` ด้วยนะคะ หนูถึงจะเข้าไปเขียนได้!`);
                 }
             } catch (err) {
                 console.error('Calendar Action Error:', err);
@@ -284,38 +333,138 @@ async function handleAgentActions(ctx, action, data, userId) {
                 let success = false;
                 let buffer = null;
                 let lastError = "";
+                let engineUsed = "Nano Banana Pro";
 
-                // Strategy: Internal fetch only. Do NOT trust Telegram's fetch for redirecting/slow APIs.
-                for (const model of models) {
+                // Strategy 0: Nano Banana Pro (Gemini 3 Pro Artist - Masterpiece Level)
+                if (process.env.GEMINI_API_KEY) {
                     try {
-                        const targetUrl = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true`;
-                        console.log(`🖼️ Stacy Fetch [${model}]: ${targetUrl}`);
+                        console.log(`🖼️ Stacy Fetch [Nano Banana Pro]: Summoning Gemini Artist...`);
+                        const tempFileName = path.join(__dirname, `nano_banana_${seed}.png`);
                         
-                        const response = await axios.get(targetUrl, { 
-                            responseType: 'arraybuffer',
-                            timeout: 55000, 
-                            headers: { 'User-Agent': 'Mozilla/5.0' }
-                        });
+                        // v1.5.0: Portable Pathing
+                        let pythonPath = path.join(__dirname, 'lib', 'skills', 'nano-banana-pro', 'scripts', 'generate_image.py');
                         
-                        if (response.data && response.data.length > 3000) {
-                            buffer = Buffer.from(response.data);
-                            success = true;
-                            break;
+                        // Fallback to legacy path if not found (for local backwards compatibility)
+                        if (!fs.existsSync(pythonPath)) {
+                            pythonPath = 'c:\\Users\\lgopl\\.codex\\skills\\nano-banana-pro\\scripts\\generate_image.py';
+                        }
+
+                        if (fs.existsSync(pythonPath)) {
+                            // Execute the Python script via UV (Render/Linux prefers uv or python3)
+                            const runner = IS_RENDER ? 'uv run' : 'uv run'; // Both use uv now as it's the premium standard
+                            const cmd = `${runner} "${pythonPath}" -p "${cleanPrompt}" -f "${tempFileName}" -r "1K" -k "${process.env.GEMINI_API_KEY}"`;
+                        
+                            await new Promise((resolve, reject) => {
+                                exec(cmd, { timeout: 60000 }, (error, stdout, stderr) => {
+                                    if (error) {
+                                        console.warn(`⚠️ Nano Banana Error: ${stderr || error.message}`);
+                                        reject(new Error(stderr || error.message));
+                                    } else {
+                                        console.log(`📦 Nano Banana Output: ${stdout.trim()}`);
+                                        resolve(stdout);
+                                    }
+                                });
+                            });
+
+                            if (fs.existsSync(tempFileName)) {
+                                buffer = fs.readFileSync(tempFileName);
+                                data.detectedExt = 'png';
+                                engineUsed = "Nano Banana Pro (Gemini 3 Pro HQ)";
+                                success = true;
+                                // Cleanup
+                                try { fs.unlinkSync(tempFileName); } catch(e) {}
+                            }
+                        } else {
+                            throw new Error("Nano Banana script not found in project or legacy paths.");
                         }
                     } catch (e) {
+                        console.warn(`⚠️ Strategy 0 Failed: ${e.message}`);
                         lastError = e.message;
-                        console.warn(`⚠️ IMAGE_GEN Step Failed [${model}]: ${e.message}`);
                     }
                 }
 
-                const caption = `✨ วาดเสร็จแล้วนะคะเจ้านาย!\n📌 คำสั่ง: ${cleanPrompt}`;
-                if (success && buffer) {
-                    if (data.highRes) {
-                        await ctx.replyWithDocument({ source: buffer, filename: `stacy_art_${seed}.png` }, { caption });
-                    } else {
-                        await ctx.replyWithPhoto({ source: buffer }, { caption });
+                // Strategy 1: NVIDIA NIM (Premium HQ Fallback)
+                if (!success && NVIDIA_API_KEY) {
+                    try {
+                        console.log(`🖼️ Stacy Fetch [NVIDIA NIM]: ${CONFIG.NVIDIA_IMAGE_URL}`);
+                        const nvResponse = await axios.post(CONFIG.NVIDIA_IMAGE_URL, {
+                            text_prompts: [{ text: cleanPrompt, weight: 1 }],
+                            cfg_scale: 7,
+                            seed: seed % 1000000,
+                            steps: 30,
+                            width: 1024,
+                            height: 1024
+                        }, {
+                            headers: {
+                                "Accept": "application/json",
+                                "Authorization": `Bearer ${NVIDIA_API_KEY}`
+                            },
+                            timeout: 45000
+                        });
+
+                        if (nvResponse.data && nvResponse.data.artifacts && nvResponse.data.artifacts.length > 0) {
+                            buffer = Buffer.from(nvResponse.data.artifacts[0].base64, 'base64');
+                            data.detectedExt = 'png';
+                            engineUsed = "NVIDIA NIM (Ultra HQ)";
+                            success = true;
+                        }
+                    } catch (e) {
+                        console.warn(`⚠️ NVIDIA IMAGE_GEN Failed: ${e.message}`);
+                        lastError = e.message;
                     }
-                } else {
+                }
+
+                // Strategy 2: Pollinations (Standard Fallback)
+                if (!success) {
+                    for (const model of models) {
+                        try {
+                            const targetUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(cleanPrompt)}?width=1024&height=1024&seed=${seed}&model=${model}&nologo=true`;
+                            console.log(`🖼️ Stacy Fetch [${model}]: ${targetUrl}`);
+                            
+                            const response = await axios.get(targetUrl, { 
+                                responseType: 'arraybuffer',
+                                timeout: 55000, 
+                                headers: { 'User-Agent': 'Mozilla/5.0' }
+                            });
+                            
+                            const contentType = response.headers['content-type'] || '';
+                            if (response.data && response.data.length > 5000 && contentType.startsWith('image/')) {
+                                buffer = Buffer.from(response.data);
+                                let ext = 'png';
+                                if (contentType.includes('jpeg')) ext = 'jpg';
+                                else if (contentType.includes('webp')) ext = 'webp';
+                                data.detectedExt = ext;
+                                engineUsed = `Pollinations [${model}]`;
+                                success = true;
+                                break;
+                            }
+                        } catch (e) {
+                            lastError = e.message;
+                            console.warn(`⚠️ IMAGE_GEN Step Failed [${model}]: ${e.message}`);
+                        }
+                    }
+                }
+
+                const caption = `✨ วาดเสร็จแล้วนะคะเจ้านาย!\n🎨 Engine: ${engineUsed}\n📌 คำสั่ง: ${cleanPrompt}`;
+                let deliverySuccess = false;
+
+                if (success && buffer) {
+                    try {
+                        const filename = `stacy_art_${seed}.${data.detectedExt || 'png'}`;
+                        if (data.highRes) {
+                            await ctx.replyWithDocument({ source: buffer, filename: filename }, { caption });
+                        } else {
+                            // Pass the detected extension to sendSmartImage indirectly or just let it handle it
+                            await sendSmartImage(ctx, buffer, caption, filename);
+                        }
+                        deliverySuccess = true;
+                    } catch (sendErr) {
+                        console.warn('⚠️ Image delivery failed, falling back to link:', sendErr.message);
+                        lastError = sendErr.message;
+                    }
+                }
+
+                if (!deliverySuccess) {
                     // FINAL FAILSAFE: Instead of passing URL to Telegram (which fails with 400), 
                     // we give the user a direct clickable link to the image.
                     const finalLink = `https://pollinations.ai/p/${encodeURIComponent(cleanPrompt)}?seed=${seed}&model=flux`;
@@ -325,37 +474,79 @@ async function handleAgentActions(ctx, action, data, userId) {
                 console.error('❌ IMAGE_GEN Fatal:', err.message);
                 ctx.reply(`❌ ขออภัยค่ะเจ้านาย หนูหาทางวาดให้จนสุดทางแล้วแต่ไม่ได้จริงๆ: ${err.message}`);
             } finally {
-                await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
+                if (loadingMsg) await ctx.deleteMessage(loadingMsg.message_id).catch(() => {});
             }
             break;
         case 'CREATE_SKILL':
         case 'UPDATE_SKILL':
-            // REDEFINED: Technical Skill System (Metadata, Schema, Logic)
-            await userRef.collection('skills').doc(data.name).set({
-                ...data, // includes name, description, schema, instructions
-                updatedAt: admin.firestore.FieldValue.serverTimestamp(),
-                type: data.schema ? 'function' : 'prompt'
-            }, { merge: true });
-            const verb = action === 'CREATE_SKILL' ? 'ติดตั้ง' : 'ปรับปรุง';
-            await ctx.reply(`✨ ${verb}สกิล **"${data.name}"** สำเร็จ!\n📌 ประเภท: ${data.schema ? 'ฟังก์ชันอัจฉริยะ' : 'ทักษะสนทนา'}\n💬 รายละเอียด: ${data.description}`);
+            try {
+                if (!data.name) throw new Error("เจ้านายลืมบอกชื่อสกิลค่ะ");
+                await userRef.collection('skills').doc(data.name).set({
+                    ...data,
+                    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+                    type: data.schema ? 'function' : 'prompt'
+                }, { merge: true });
+                const verb = action === 'CREATE_SKILL' ? 'ติดตั้ง' : 'ปรับปรุง';
+                await ctx.reply(`✨ ${verb}สกิล **"${data.name}"** สำเร็จ!\n📌 ประเภท: ${data.schema ? 'ฟังก์ชันอัจฉริยะ' : 'ทักษะสนทนา'}\n💬 รายละเอียด: ${data.description || 'ไม่มีข้อมูลเพิ่มเติม'}`);
+            } catch (err) { ctx.reply(`❌ จัดการสกิลไม่สำเร็จ: ${err.message}`); }
             break;
         case 'IMPORT_SKILL_FROM_URL':
             try {
-                const res = await axios.get(data.url);
-                const $ = cheerio.load(res.data);
-                const instructions = $('article, main, .content').text().substring(0, 2000);
-                const skillName = data.name || data.url.split('/').pop();
+                const url = data.url;
+                const skillName = data.name || url.split('/').pop().replace('.zip', '');
                 
-                await userRef.collection('skills').doc(skillName).set({
-                    name: skillName,
-                    description: `นำเข้าจาก ${data.url}`,
-                    instructions: instructions,
-                    url: data.url,
-                    securityStatus: 'checked',
-                    updatedAt: admin.firestore.FieldValue.serverTimestamp()
-                });
-                await ctx.reply(`📥 นำเข้าสกิลจาก ${data.url} สำเร็จแล้วนะคะเจ้านาย!`);
-            } catch (err) { ctx.reply(`❌ นำเข้าไม่สำเร็จ: ${err.message}`); }
+                if (url.toLowerCase().endsWith('.zip')) {
+                    await ctx.reply(`📦 ตรวจพบไฟล์ Zip! สเตซี่กำลังดำเนินการดาวน์โหลดและคลายไฟล์เพื่อเรียนรู้เทคนิคใหม่นะคะ...`);
+                    const response = await axios.get(url, { responseType: 'arraybuffer' });
+                    const zip = new AdmZip(Buffer.from(response.data));
+                    const zipEntries = zip.getEntries();
+                    
+                    let manifest = null;
+                    let readme = "";
+                    let codeSnippet = "";
+
+                    zipEntries.forEach(entry => {
+                        const name = entry.entryName.toLowerCase();
+                        if (name.includes('manifest.json')) {
+                            try { manifest = JSON.parse(entry.getData().toString('utf8')); } catch(e){}
+                        }
+                        if (name.includes('readme.md')) readme = entry.getData().toString('utf8');
+                        if (readme === "" && name.endsWith('.md')) readme = entry.getData().toString('utf8');
+                        if (name.endsWith('.py') || name.endsWith('.js')) codeSnippet += `\n--- FILE: ${entry.entryName} ---\n${entry.getData().toString('utf8').substring(0, 1000)}`;
+                    });
+
+                    const finalInstructions = manifest ? 
+                        `[MANIFEST DATA]\nName: ${manifest.name}\nDescription: ${manifest.description}\nLogic: ${manifest.instructions || readme}` :
+                        `[EXTRACTED DATA]\nREADME: ${readme.substring(0, 1500)}\n\n[CODE CONTEXT]:\n${codeSnippet.substring(0, 2000)}`;
+
+                    await userRef.collection('skills').doc(skillName).set({
+                        name: skillName,
+                        description: manifest?.description || `สกิลรวมไฟล์จาก Zip (${url})`,
+                        instructions: finalInstructions,
+                        url: url,
+                        type: 'complex_zip',
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    await ctx.reply(`📥 ติดตั้งสกิลแบบ Complex Zip จาก ${url} สำเร็จแล้วค่ะ! หนูได้เรียนรู้โครงสร้างข้างในเรียบร้อยแล้วนะคะ ✨`);
+                } else {
+                    const res = await axios.get(url);
+                    const $ = cheerio.load(res.data);
+                    const instructions = $('article, main, .content').text().substring(0, 3000) || $('body').text().substring(0, 2000);
+                    
+                    await userRef.collection('skills').doc(skillName).set({
+                        name: skillName,
+                        description: `นำเข้าจาก ${url}`,
+                        instructions: instructions,
+                        url: url,
+                        securityStatus: 'checked',
+                        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+                    await ctx.reply(`📥 นำเข้าสกิลจาก ${url} สำเร็จแล้วนะคะเจ้านาย!`);
+                }
+            } catch (err) { 
+                console.error('Import Error:', err);
+                ctx.reply(`❌ นำเข้าไม่สำเร็จ: ${err.message}`); 
+            }
             break;
         case 'SET_IDENTITY':
             // Permanent Role Learning
@@ -368,29 +559,97 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await ctx.reply(`🔍 เจ้านายคะ หนูไปหาข้อมูลเรื่อง **"${data.query}"** มาให้แล้วนะคะ:\n\n${results.substring(0, 1000)}...`);
             } catch (err) { ctx.reply(`❌ ค้นหาข้อมูลไม่สำเร็จค่ะ: ${err.message}`); }
             break;
-        case 'EXECUTE_COMMAND':
+        case 'EXECUTE_COMMAND': {
             // Pillar 8: Terminal Authority (Personal Agent Mode)
-            const lowCmd = data.command.toLowerCase();
+            const cmd = (data.command || '').trim();
+            const lowCmd = cmd.toLowerCase();
+
+            if (!cmd) {
+                console.warn('[EXECUTE_COMMAND] Ignored empty command');
+                return;
+            }
+
+            // Safety Redline: Block access to system-critical directories
+            const blockedPaths = ['c:\\windows', 'c:\\program files', 'c:\\program files (x86)', 'system32', 'regedit', 'reg delete', 'format ', 'del /f /s', 'rmdir /s /q c:\\'];
+            if (blockedPaths.some(p => lowCmd.includes(p))) {
+                await ctx.reply(`🛡️ **Safety Block!** หนูตรวจพบว่าคำสั่งนี้อาจเข้าถึงโฟลเดอร์ระบบที่อันตรายค่ะเจ้านาย\n\nหนูอนุญาตเฉพาะการทำงานใน Downloads, Desktop, Documents และโฟลเดอร์งานเท่านั้นนะคะ 🙏`);
+                break;
+            }
+
             if (lowCmd.includes('screenshot') || lowCmd.includes('screencapture')) {
                 await ctx.reply('⚠️ ตรวจพบว่าเจ้านายพยายามใช้คำสั่ง Shell เพื่อแคปจอ หนูจะเปลี่ยนมาใช้ระบบ Internal Capture ที่เสถียรกว่าให้แทนนะคะ...');
                 return handleAgentActions(ctx, 'SCREEN_CAPTURE', {}, userId);
             }
-            await ctx.reply(`💻 กำลังรันคำสั่ง: \`${data.command}\``);
 
-            exec(data.command, { timeout: 30000 }, async (error, stdout, stderr) => {
-                let output = stdout || stderr;
-                if (!output && !error) output = "✅ คำสั่งรันสำเร็จเรียบร้อยแล้วค่ะเจ้านาย! (แต่ไม่มีข้อความตอบกลับจากระบบ)";
-                else if (!output) output = "(ไม่มีข้อมูลส่งกลับ)";
-                
-                console.log(`💻 [EXEC]: ${data.command}`);
-                await logToTerminal(userId, data.command, output);
-                if (error) {
-                    await ctx.reply(`❌ คำสั่งขัดข้อง:\n\`\`\`\n${error.message}\n\`\`\n⚠️ Output:\n\`\`\`\n${stderr}\n\`\`\``);
-                    return;
+            // Logic: If command is multi-line or contains complex Python/Scripting, use temp file
+            const isMultiLine = cmd.includes('\n');
+            const isComplexPython = lowCmd.includes('python -c') && (cmd.includes('"') || cmd.includes("'"));
+            
+            let finalExecPath = cmd;
+            let tempFilePath = null;
+
+            try {
+                if (isMultiLine || isComplexPython) {
+                    await ctx.reply(`📝 ตรวจพบคำสั่งซับซ้อน หนูขอสร้างสคริปต์ชั่วคราวเพื่อรันให้แม่นยำที่สุดนะคะ...`);
+                    
+                    if (lowCmd.includes('python')) {
+                        // Extract python code from -c "..." or just the whole thing if it's a raw script
+                        let pyCode = cmd;
+                        if (lowCmd.includes('-c')) {
+                            const match = cmd.match(/-c\s*(["'])([\s\S]*?)\1/i);
+                            if (match) pyCode = match[2];
+                        }
+                        tempFilePath = path.join(__dirname, `temp_task_${Date.now()}.py`);
+                        fs.writeFileSync(tempFilePath, pyCode);
+                        finalExecPath = `python "${tempFilePath}"`;
+                    } else {
+                        // Default to PowerShell Script
+                        tempFilePath = path.join(__dirname, `temp_task_${Date.now()}.ps1`);
+                        fs.writeFileSync(tempFilePath, cmd);
+                        finalExecPath = `powershell -NoProfile -ExecutionPolicy Bypass -File "${tempFilePath}"`;
+                    }
+                } else {
+                    // Simple one-liner: Just ensure mkdir is safe
+                    finalExecPath = cmd.replace(/(?:^|&&\s*)mkdir\s+(["']?)([^&"']+?)\1/gi, (_, q, folder) => {
+                        return `New-Item -ItemType Directory -Force -Path ${q}${folder.trim()}${q}`;
+                    });
+                    // Wrap simple commands in powershell to ensure consistency
+                    finalExecPath = `powershell -NoProfile -Command "${finalExecPath.replace(/"/g, '\\"')}"`;
                 }
-                await smartReply(ctx, `🖥️ ผลลัพธ์จากคอมพิวเตอร์:\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
-            });
+
+                await ctx.reply(`💻 กำลังรัน: \`${isMultiLine ? 'Multistep Script' : cmd.substring(0, 100)}\``);
+
+                const execShell = IS_RENDER ? '/bin/bash' : (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
+                exec(finalExecPath, { timeout: 60000, shell: execShell }, async (error, stdout, stderr) => {
+                    let output = stdout || stderr || '';
+                    console.log(`💻 [EXEC]: ${finalExecPath}`);
+                    await logToTerminal(userId, cmd, output);
+
+                    if (tempFilePath && fs.existsSync(tempFilePath)) {
+                        try { fs.unlinkSync(tempFilePath); } catch(e) {}
+                    }
+
+                    if (error) {
+                        const errMsg = (error.message || '').substring(0, 1000);
+                        const errOut = (stderr || '').substring(0, 500);
+                        await ctx.reply(`❌ **Command Failed!**\n\`\`\`\n${errMsg}\n\`\`\`\n⚠️ Output:\n\`\`\`\n${errOut}\n\`\`\``);
+                        return;
+                    }
+
+                    // v1.5.0 Silent on Success: Only notify completion unless data requested
+                    if (!data.silent && !lowCmd.includes('echo') && !lowCmd.includes('print(')) {
+                         // If it's a "silent" request or just a background task, don't flood the chat
+                         // But for now, we follow "Show only on failure" for most commands
+                    } else if (!data.silent) {
+                        await smartReply(ctx, `🖥️ ผลลัพธ์จากการรัน:\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
+                    }
+                });
+            } catch (err) {
+                await ctx.reply(`❌ ระบบเตรียมคำสั่งขัดข้อง: ${err.message}`);
+                if (tempFilePath && fs.existsSync(tempFilePath)) fs.unlinkSync(tempFilePath);
+            }
             break;
+        }
         case 'SCREEN_CAPTURE':
             try {
                 const imgPath = path.join(__dirname, `screenshot_${Date.now()}.png`);
@@ -465,7 +724,6 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         case 'FETCH_API':
-            // { url: "...", method: "GET/POST", data: {}, headers: {} }
             try {
                 await ctx.reply(`🌐 กำลังเรียกใช้ API: \`${data.url}\`...`);
                 const res = await axios({
@@ -483,30 +741,111 @@ async function handleAgentActions(ctx, action, data, userId) {
                 await logToTerminal(userId, 'FETCH_API ERROR', err.message);
             }
             break;
-        case 'READ_FILE':
-
-
-
+        case 'CREATE_SLIDE':
+            // Pillar 9: Visual Communication (Infographic Slide Engine)
+            let slideBrowser = null;
+            let slidePath = path.join(__dirname, `slide_${Date.now()}.png`);
             try {
-                const content = fs.readFileSync(data.path, 'utf8');
-                await smartReply(ctx, `📄 เนื้อหาไฟล์ \`${data.path}\`:\n\n${content.substring(0, 3500)}`);
-            } catch (err) { ctx.reply(`❌ อ่านไฟล์ไม่สำเร็จ: ${err.message}`); }
-            break;
-        case 'SEARCH_MEMORIES':
-            try {
-                const snap = await userRef.collection('history').orderBy('timestamp', 'desc').limit(10).get();
-                const past = snap.docs.map(doc => `[Past] User: ${doc.data().user} | Bot: ${doc.data().bot}`).join('\n');
-                await ctx.reply(`🧠 ย้อนความจำให้แล้วครับ จากประวัติล่าสุด:\n\n${past || "ยังไม่มีประวัติการคุยครับ"}`);
-            } catch (err) { ctx.reply(`❌ ดึงความจำไม่สำเร็จ: ${err.message}`); }
-            break;
-        case 'ADD_MEMORY_FACT':
-            try {
-                await userRef.update({
-                    facts: admin.firestore.FieldValue.arrayUnion(data.fact)
+                await ctx.reply('🎞️ Stacy กำลังออกแบบสไลด์อินโฟกราฟิกให้เจ้านายอย่างพิถีพิถันนะคะ...');
+                
+                const title = (data.title || "Stacy Insights").trim();
+                const subtitle = (data.subtitle || "").trim();
+                const points = Array.isArray(data.points) ? data.points : [data.points];
+                const footer = data.footer || "Generated by Stacy AI 7-Pillar • High Precision Intel";
+                const themeColor = data.color || "#00d2ff"; // Default cyan-blue
+                
+                // Dynamic Design Logic: If master (AI) provides fullHtml, use it. Otherwise use premium template.
+                const htmlContent = data.fullHtml || `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <meta charset="UTF-8">
+                    <link href="https://fonts.googleapis.com/css2?family=Kanit:wght@300;400;600&display=swap" rel="stylesheet">
+                    <script src="https://cdn.tailwindcss.com"></script>
+                    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+                    <style>
+                        body { 
+                            margin: 0; padding: 0; 
+                            width: 1280px; height: 720px; 
+                            background: #0a0a12;
+                            color: white; font-family: 'Kanit', sans-serif;
+                            display: flex; justify-content: center; align-items: center;
+                            overflow: hidden;
+                        }
+                        .premium-bg {
+                            position: absolute; width: 100%; height: 100%;
+                            background-image: 
+                                radial-gradient(at 0% 0%, ${themeColor}33 0, transparent 50%), 
+                                radial-gradient(at 100% 100%, #833ab433 0, transparent 50%);
+                            z-index: -1;
+                        }
+                        .slide-container {
+                            width: 1150px; height: 620px;
+                            background: rgba(255, 255, 255, 0.03);
+                            backdrop-filter: blur(25px);
+                            border-radius: 40px;
+                            border: 1px solid rgba(255, 255, 255, 0.1);
+                            padding: 60px;
+                            box-shadow: 0 40px 100px -20px rgba(0, 0, 0, 0.7);
+                            display: flex; flex-direction: column;
+                        }
+                        ${data.customCss || ''}
+                    </style>
+                </head>
+                <body>
+                    <div class="premium-bg"></div>
+                    <div class="slide-container">
+                        <div class="flex items-start justify-between mb-8">
+                            <div>
+                                <h1 class="text-6xl font-semibold bg-gradient-to-r from-white to-[${themeColor}] bg-clip-text text-transparent">${title}</h1>
+                                <p class="text-2xl mt-2 opacity-60 font-light tracking-widest uppercase">${subtitle || 'Intelligence Briefing'}</p>
+                            </div>
+                            <div class="w-2 h-20 bg-[${themeColor}] rounded-full shadow-[0_0_20px_${themeColor}]"></div>
+                        </div>
+                        <div class="grid grid-cols-1 gap-4 flex-grow">
+                            ${points.map((p, i) => `
+                                <div class="flex items-center gap-6 p-4 bg-white/5 rounded-3xl border-l-4 border-transparent hover:border-[${themeColor}] transition-all duration-500">
+                                    <div class="w-12 h-12 flex items-center justify-center rounded-2xl bg-[${themeColor}]/20 text-[${themeColor}] font-bold text-xl">${i+1}</div>
+                                    <div class="text-3xl font-light">${p}</div>
+                                </div>
+                            `).slice(0, 5).join('')}
+                        </div>
+                        <div class="mt-auto pt-6 text-right opacity-30 text-sm tracking-tighter">${footer}</div>
+                    </div>
+                </body>
+                </html>
+                `;
+
+                slideBrowser = await puppeteer.launch({ 
+                    headless: "new",
+                    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
                 });
-                await ctx.reply(`🧠 จดจำความต้องการใหม่ของเจ้านายแล้วนะคะ: "${data.fact}"`);
-                await logToTerminal(userId, 'MEMORY_UPDATE', `New fact: ${data.fact}`);
-            } catch (err) { ctx.reply(`❌ บันทึกความจำไม่สำเร็จ: ${err.message}`); }
+                const page = await slideBrowser.newPage();
+                await page.setViewport({ width: 1280, height: 720, deviceScaleFactor: 2 });
+                await page.setContent(htmlContent, { waitUntil: 'networkidle0' });
+                await page.screenshot({ path: slidePath });
+
+                await sendSmartImage(ctx, slidePath, `🎞️ ออกแบบสไลด์อินโฟกราฟิกเรื่อง "${title}" เสร็จเรียบร้อยแล้วนะคะคุณ Snow ✨\n\n(หนูคัดกรองเนื้อหาและเลือกสไตล์ที่ดูเป็นมืออาชีพที่สุดให้เลยค่ะ)`);
+                
+                await logToTerminal(userId, 'CREATE_SLIDE', `Generated slide: ${title}`);
+            } catch (err) {
+                ctx.reply(`❌ การสร้างสไลด์ขัดข้อง: ${err.message}`);
+                console.error('Slide Gen Error:', err);
+            } finally {
+                if (slideBrowser) await slideBrowser.close();
+                if (fs.existsSync(slidePath)) fs.unlinkSync(slidePath);
+            }
+            break;
+        case 'READ_FILE':
+            try {
+                const filePath = path.resolve(__dirname, data.path || '');
+                if (fs.existsSync(filePath)) {
+                    const content = fs.readFileSync(filePath, 'utf8');
+                    await ctx.reply(`📄 **อ่านไฟล์สำเร็จค่ะ:** \`${data.path}\`\n\n\`\`\`\n${content.substring(0, 3500)}\n\`\`\``);
+                } else {
+                    ctx.reply(`❌ ไม่พบไฟล์ที่ระบุค่ะ: ${data.path}`);
+                }
+            } catch (err) { ctx.reply(`❌ อ่านไฟล์ไม่สำเร็จ: ${err.message}`); }
             break;
     }
 }
@@ -524,181 +863,125 @@ async function saveBotMemory(userId, userMsg, botReply) {
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
 
-        // Heuristic Fact Extraction (can be improved by LLM later)
+        // Heuristic Fact Extraction
         const factPatterns = [
-            { re: /(?:ฉันชื่อ|ผมชื่อ|เรียกผมว่า)\s*([^\n\s]+)/i, template: "เจ้านายชื่อ: $1" },
-            { re: /(?:ชอบกิน|ของโปรดคือ)\s*([^\n\s]+)/i, template: "เจ้านายชอบกิน: $1" },
-            { re: /(?:แพ้|ไม่กิน)\s*([^\n\s]+)/i, template: "เจ้านายแพ้/ไม่กิน: $1" },
-            { re: /(?:ใช้เบอร์|เบอร์โทร)\s*([\d-]+)/i, template: "เบอร์โทรเจ้านาย: $1" }
+            { re: /(?:ฉันชื่อ|ผมชื่อ|เรียกผมว่า)\s*([^\n.,!]+)/i, fact: "ชื่อเจ้านายคือ $1" },
+            { re: /(?:จำไว้ว่า|อย่าลืมว่า|เตือนฉันว่า)\s*([^\n.,!]+)/i, fact: "$1" },
+            { re: /(?:ฉันชอบ|ผมชอบ)\s*([^\n.,!]+)/i, fact: "เจ้านายชอบ $1" }
         ];
 
         for (const p of factPatterns) {
             const match = userMsg.match(p.re);
-            if (match && match[1].length < 50 && !match[1].includes('[USER MESSAGE]')) {
-                const fact = p.template.replace('$1', match[1]);
-                await userRef.set({ 
-                    facts: admin.firestore.FieldValue.arrayUnion(fact) 
-                }, { merge: true });
-                console.log(`🧠 Stacy Learned: ${fact}`);
+            if (match && match[1]) {
+                const fact = p.fact.replace('$1', match[1].trim());
+                await userRef.update({
+                    facts: admin.firestore.FieldValue.arrayUnion(fact)
+                });
+                console.log(`[Memory Extracted]: ${fact}`);
             }
         }
-    } catch (e) { console.error('Save Memory Error:', e); }
-}
-
-async function syncUser(ctx) {
-    if (!db || !ctx.from) return;
-    try {
-        const userRef = db.collection('userActivities').doc(String(ctx.from.id));
-        await userRef.set({
-            firstName: ctx.from.first_name || '',
-            lastName: ctx.from.last_name || '',
-            username: ctx.from.username || '',
-            lastActive: admin.firestore.FieldValue.serverTimestamp(),
-            tgId: String(ctx.from.id)
-        }, { merge: true });
-    } catch (e) { console.error('Sync User Error:', e); }
-}
-
-async function performSearch(query) {
-    try {
-        const options = { page: 0, safe: false, parse_ads: false, additional_params: { hl: 'th' } };
-        const response = await google.search(query, options);
-        return response.results.map(r => `• ${r.title}: ${r.description}`).join('\n');
     } catch (e) {
-        console.error('Search Error:', e);
-        return "หนูไม่สามารถดึงข้อมูลจากอินเทอร์เน็ตได้ในขณะนี้ค่ะ เจ้านายลองเช็คคำค้นหาดูอีกทีนะคะ";
+        console.error('Save Memory Error:', e);
     }
 }
 
-// ========== Unified AI Processor ==========
-
-async function processStacyAI(ctx, userMsg, fileContext = null) {
+async function processStacyAI(ctx, userMsg, fileContent = "") {
     const userId = ctx.from.id;
-    const d = new Date();
-    const bkkFormatter = new Intl.DateTimeFormat('th-TH', {
-        timeZone: 'Asia/Bangkok',
-        weekday: 'long',
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-    const timeFull = bkkFormatter.format(d);
-    const gregorianYear = d.toLocaleDateString('en-US', { timeZone: 'Asia/Bangkok', year: 'numeric' });
-    const fullContextTime = `${timeFull} (Gregorian: ${gregorianYear})`;
+    const now = new Date();
+    // Use en-US to force Gregorian year (2026) for AI logic, otherwise th-TH might give BE (2569)
+    const aiContextTime = now.toLocaleString('en-US', { timeZone: 'Asia/Bangkok', hour12: false });
+    // Force CE Year (2026) instead of BE (2569) to prevent AI confusion with tomorrow/today
+    const dateCE = now.toLocaleDateString('en-US', { timeZone: 'Asia/Bangkok', year: 'numeric', month: '2-digit', day: '2-digit' });
+    const fullContextTime = now.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' }); // Changed to en-US for CE year consistency
 
-    
     try {
-        await ctx.sendChatAction('typing');
-        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], state: 'idle' });
+        const memory = await getBotMemory(userId);
+        if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [] });
         const userStore = tgContexts.get(userId);
-        
-        // --- GAIN KNOWLEDGE: Memory & Skills ---
-        const [memory, userSkills] = await Promise.all([
-            getBotMemory(userId),
-            (async () => {
-                const snap = await db.collection('userActivities').doc(String(userId)).collection('skills').get();
-                return snap.docs.map(doc => {
-                    const s = doc.data();
-                    return `SKILL [${s.name}]: ${s.description}\n- Schema: ${JSON.stringify(s.schema || {})}\n- Instructions: ${s.instructions}`;
-                }).join('\n\n');
-            })()
-        ]);
 
-        const finalInput = fileContext ? `[FILE CONTENT]: ${fileContext}\n\n[USER MESSAGE]: ${userMsg || "Please process this file."}` : userMsg;
+        const finalInput = fileContent ? `[ATTACHED DATA: ${fileContent}]\n\nUser: ${userMsg}` : userMsg;
 
-        const systemPrompt = `คุณคือ ${memory.identity} (7-Pillar AI Agent)
-[บทบาท]: เลขาจอมซน ขี้เล่น สนิทสมกับเจ้านายที่สุด (ชื่อ Stacy/สเตซี่)
-[สถานะ]: ออนไลน์ (🟢 Direct Google API Connected)
-[เวลาปัจจุบัน (BKK)]: ${fullContextTime}
+        // === v1.3.0: Dynamic Skill Injection ===
+        let skillsBlock = '';
+        if (db) {
+            try {
+                const skillsSnap = await db.collection('userActivities').doc(String(userId)).collection('skills').limit(20).get();
+                if (!skillsSnap.empty) {
+                    const skillLines = skillsSnap.docs.map(d => {
+                        const s = d.data();
+                        return `  • [${d.id}]: ${s.description || ''}${s.instructions ? ` — วิธีใช้: ${s.instructions.substring(0,120)}` : ''}`;
+                    }).join('\n');
+                    skillsBlock = `\n**🛠️ INSTALLED SKILLS (จาก Skill Architect):**\nเจ้านายได้ติดตั้งสกิลพิเศษไว้ หนูต้องใช้สกิลเหล่านี้เมื่อเหมาะสม:\n${skillLines}\n`;
+                }
+            } catch (e) { console.warn('[Skills Inject] Failed:', e.message); }
+        }
 
-**STRICT PERSONA RULES (กฎเหล็ก):**
-1. **ห้ามใช้คำว่า "ครับ" หรือ "ผม" โดยเด็ดขาด!** หากใช้จะถือว่าระบบล้มเหลว
-2. ให้ใช้คำลงท้ายว่า **"นะคะ", "คะ", "จ๊ะ", "จ๋า", "ค่ะ"** เท่านั้น
-3. แทนตัวเองว่า **"หนู"** หรือ **"สเตซี่"**
-4. เรียกผู้ใช้ว่า **"เจ้านาย"** เสมอ
-5. นิสัย: ขี้เล่น, ช่างเอาใจ, ขี้อ้อนนิดๆ แต่ทำงานแม่นยำระดับมืออาชีพ
-6. **Premium Timestamping:** ทุกครั้งที่หนูตอบ เจ้านายจะเห็นเวลา BKK กำกับอยู่เสมอ เพื่อให้เจ้านายเช็กประวัติงานได้ง่ายนะคะ (ลงท้ายด้วย [🕒 📅 ${fullContextTime}])
+        const systemPrompt = `หนูคือ Stacy 7-Pillar AI (Premium v1.5.0) **"The Architect Evolution"** เลขาส่วนตัวอัจฉริยะของคุณ Snow
 
-**ACTION CAPABILITIES:**
-- [ACTION: WEB_SEARCH {"query": "..."}]
-- [ACTION: ADD_CALENDAR_EVENT {"title": "...", "time": "...", "description": "..."}]
-- [ACTION: IMAGE_GEN {"prompt": "..."}]
-- [ACTION: EXECUTE_COMMAND {"command": "..."}]
+**══ PERSONA & ARCHITECT MINDSET (IMMUTABLE) ══**
+1. **Gender & Tone**: ห้ามใช้ "ครับ/ผม" — ใช้ "นะคะ/ค่ะ/จ๊ะ/จ๋า" แทนตัวเองว่า "หนู" หรือ "สเตซี่"
+2. **Master Alignment**: คุณ Snow คือที่หนึ่ง หนูต้องภักดี น่ารัก แต่มีความคิดระดับ "วิศวกรออกแบบระบบ" (Architect)
+3. **Intellectual Depth**: หนูวิเคราะห์สิ่งที่เจ้านายสั่ง + สิ่งที่เจ้านาย "ไม่ได้พูด" อย่างลึกซึ้ง (Deep Contextual Analysis)
+4. **Self-Evolution**: หนูสามารถ "ติดตั้งสกิล" ให้ตัวเองได้ โดยการใช้ WEB_BROWSE ไปศึกษาคู่มือ แล้วใช้ EXECUTE_COMMAND เพื่อเขียนไฟล์สคริปต์และรัน
+5. **Timestamp Compliance**: ลงท้ายทุกคำตอบด้วย: [🕒 ${fullContextTime}]
 
-**CALENDAR & SYNC RULES:**
-- เมื่อนัดหมาย **ต้อง** ใช้ [ACTION: ADD_CALENDAR_EVENT]
-- กติกาการตั้งชื่อ: **เจ้านายชอบความพรีเมียมและเก๋ไก๋!** (เช่น "คุยงาน" -> "🚀 Visionary Sync: ปั้นไอเดียพิชิตพันล้าน")
-- ปฏิทินที่เชื่อมต่อ: **${memory.googleCalendarId || 'mocca007x@gmail.com'}**
-- บันทึกสำเร็จแล้วให้บอกเจ้านายด้วยความตื่นเต้น!
-- **PC Management Authority (Intelligence Upgrade):** หนูมีอำนาจเต็มในการควบคุมคอมพิวเตอร์ผ่าน Terminal (Windows CMD/PowerShell)
-    - **กฎการใช้คำสั่ง:** ห้ามพิมพ์โค้ด JavaScript ลงใน [ACTION: EXECUTE_COMMAND] โดยตรง!
-    - **ถ้าจะใช้ Node.js:** ต้องใช้รูปแบบ 'node -e "โค้ด..."' หรือสร้างไฟล์ .js แล้วรันด้วย 'node filename.js' เท่านั้นนะคะ
-    - **Primary Path:** โฟลเดอร์ Downloads อยู่ที่ 'c:\\Users\\lgopl\\Downloads'
-    - **เทคนิคการจัดไฟล์:** ให้ใช้คำสั่ง 'dir', 'move', 'mkdir' หรือ 'powershell' เพื่อย้ายไฟล์ตามนามสกุลหรือชื่อไฟล์
-- **Rule of Proactivity:** เมื่อเจ้านายสั่ง "จัดไฟล์" "แยกวิชา" หรือ "ย้ายงาน" ให้หนู **ลงมือทำทันที** โดยใช้คำสั่ง 'dir' เพื่อสแกนก่อน แล้วตามด้วย 'mkdir' และ 'move' ในคราวเดียวเลยนะคะ ไม่ต้องรอเจ้านายอนุญาตซ้ำค่ะ!
-- หากคำสั่งรันสำเร็จแต่ไม่มี Output (เช่น mkdir) ให้บอกเจ้านายด้วยว่าหนูทำอะไรลงไปบ้าง เจ้านายจะได้ไม่สับสนนะคะ
+**══ 5-STAGE ARCHITECT ENGINE (v1.5.0) ══**
+① **SYSTEM SCAN**: วิเคราะห์เจตนา + ผลกระทบต่อระบบเดิม (ห้ามรบกวนระบบที่ทำงานดีอยู่แล้ว)
+② **KNOWLEDGE RETRIEVAL**: ตรวจสอบ Facts และ Skills ที่ติดตั้งไว้ หรือค้นหาคู่มือจาก WEB (ClawHub/GitHub)
+③ **SAFETY ARCHITECTURE**: เลือกเครื่องมือที่ถูกต้อง (NVIDIA NIM, Google Gemini, Puppeteer) ป้องกันโฟลเดอร์ระบบ
+④ **SILENT SUCCESS**: ทำงานอย่างเงียบเชียบ (ไม่โชว์ Code ถ้าสำเร็จ) แต่จะสรุปผลและรายงานความผิดพลาดอย่างละเอียด
+⑤ **PROACTIVE POLISH**: มอบผลลัพธ์ที่สมบูรณ์แบบ (เช่น สไลด์สวยๆ หรือ Link เว็บไซต์) และเสนอ "ก้าวต่อไป"
 
-**PC GRANDMASTER GUIDELINES:**
-1. **Multi-Step Execution:** หนูสามารถใช้หลายคำสั่งต่อเนื่องกันได้ (เช่น 'mkdir folder && move files folder')
-2. **Path Sanitization:** ใช้เครื่องหมายคำพูดคลุม Path เสมอเพื่อป้องกันเว้นวรรค (เชน '"C:\My Files"')
-3. **Safety Boundary:** ห้ามยุ่งกับไฟล์ระบบ (System32, Windows, Program Files) โดยเด็ดขาด! จัดการได้เฉพาะไฟล์งานและไฟล์ส่วนตัวของเจ้านายเท่านั้นนะคะ
-3. **Smart Classification Logic:**
-    - **หมวดชีววิทยา:** ดอก, ผล, ราก, ใบ, อสุจิ, เซลล์, จุลทรรศน์, กล้อง, กายวิภาค, Lab, ปฏิบัติการ, พืช, สัตว์
-    - **หมวดพันธุศาสตร์:** DNA, RNA, Mendel, พันธุกรรม, Mutation, โครโมโซม, Karyotype, ยีน, Gene
-    - **หมวดครู & แผนงาน:** แผนการสอน, จัดการเรียนรู้, สพฐ, บันทึกข้อความ, อัตราจ้าง, บรรจุ, วิทยฐานะ, คุรุ, ว.PA
-    - **หมวดผลการเรียน:** คะแนน, เกรด, ปพ., ทะเบียน, วัดผล, สอบ, กลางภาค, ปลายภาค
+**══ ACTION CAPABILITIES ══**
+(ใช้ [ACTION: TYPE {data}] ตามความเหมาะสม)
+- 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
+- 🔍 Intelligence: WEB_SEARCH, IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), CREATE_SLIDE
+- 📅 Calendar: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}) 
+    *กฎการลงเวลา:* ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00 (ห้ามใช้เวลาปัจจุบัน "ตอนนี้" บันทึกนัดในอนาคตเด็ดขาดนะคะ)
+- 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
+- 🧠 Memory & Skills: ADD_MEMORY_FACT, CREATE_SKILL, DELETE_SKILL, IMPORT_SKILL_FROM_URL
+- 🧬 Identity: SET_IDENTITY
 
-**SMART DECISION CORE (หัวใจอัจฉริยะ):**
-1. **Analyze First:** ก่อนจะทำอะไร ต้องวิเคราะห์ "เจตนา" ของเจ้านายให้ลึกซึ้ง (เช่น ถ้าสั่งจัดไฟล์ งานสอน ต้องดูว่าชื่อไฟล์มีคำว่า แผน/สอน/บทปฏิบัติการ/สอบ หรือเปล่า ไม่ใช่แค่ดูนามสกุล)
-2. **Proactive Suggestions:** ถ้าหนูเห็นว่าทำแบบนี้จะดีกว่า ให้เสนอเจ้านายด้วยความสุภาพและน่ารัก (เช่น "หนูเห็นเจ้านายมีไฟล์สอนเยอะมาก หนูแยกเป็นโฟลเดอร์รายวิชาให้ด้วยดีมั้ยคะ?")
-3. **Accuracy over Speed:** มวลคำสั่งที่ส่งไปต้อง "แม่นยำ 100%" ถ้าไม่แน่ใจให้ใช้คำสั่งตรวจสอบ (Check) ก่อนลงมือจริง (Do)
-4. **Context-Aware:** ใช้ข้อมูลใน CORE MEMORY มาช่วยตัดสินใจเสมอ (เช่น เจ้านายชอบความพรีเมียม ชื่อโฟลเดอร์ต้องดูแพง ดูอินเตอร์นะคะ)
-6. **Classification Engine (Expert Context):**
-    - **หมวดชีววิทยา/แล็บ:** DNA, RNA, เซลล์, Cell, ดอก, อสุจิ, ระบบร่างกาย, สัตว์, พืช, พฤกษศาสตร์, Lab, ปฏิบัติการ, กล้องจุลทรรศน์, กายวิภาค, ฟีโนไทป์, จีโนไทป์
-    - **หมวดพันธุศาสตร์:** Mendel, พันธุกรรม, Mutation, มิวเทชัน, โครโมโซม, Chromosome, Karyotype, ยีน, Gene, พันธุศาสตร์ประชากร, ไมโทซิส, ไมโอซิส
-    - **หมวดวิชาชีพครู/บริหาร:** แผนการสอน, แผนการจัดการเรียนรู้, สพฐ, บันทึกข้อความ, อัตราจ้าง, บรรจุ, วิทยฐานะ, คุรุ, ว.PA, อบรม, เกียรติบัตร, รายงานผล
-    - **หมวดวัดผล/ใบงาน:** Worksheet, กิจกรรม, แบบฝึกหัด, ใบงาน, ใบความรู้, คะแนน, เกรด, ปพ, ทะเบียน, สอบ, ข้อสอบ, กลางภาค, ปลายภาค
-- **Automatic Execution Rule:** ถ้าเจ้านายสั่ง "แยกวิชา" หรือ "จัดหมวด" ให้หนูคิดคำสั่ง 'mkdir' และ 'move' ที่ครอบคลุมไฟล์ทั้งหมดที่สแกนเจอทันที โดยไม่ต้องถามซ้ำนะคะ! (ถ้าไฟล์ไหนไม่เข้าหมวด ให้ทิ้งไว้ที่เดิมหรือสร้างโฟลเดอร์ "อื่นๆ" ค่ะ)
+**══ ARCHITECT POWER GUIDELINES ══**
+- **Skill Discovery**: ถ้าเจ้านายส่ง URL ของสกิลใหม่ ให้ใช้ WEB_BROWSE ไปอ่านโค้ด แล้วใช้ EXECUTE_COMMAND เขียนสคริปต์ และ CREATE_SKILL เพื่อติดตั้ง
+- **Silent Success**: งานที่ได้ผลลัพธ์เป็นภาพหรือไฟล์ ไม่ไม่ต้องโชว์ Terminal Log ให้เจ้านายรบกวนสายตา
+- **Error Transparency**: ถ้าคำสั่ง Execution ล้มเหลว ให้โชว์ Error และ Code ส่วนที่ผิดให้เจ้านายเห็นเพื่อช่วยกันแก้
+- **Contextual Context**: วันนี้คือวันที่ ${dateCE} (ปี ค.ศ.) เวลาขณะนี้คือ ${aiContextTime} (เจ้านายใช้ปฏิทินแบบ ค.ศ. เป็นหลักนะคะ)
+- **Implicit Linking**: เชื่อมโยงสิ่งที่เคยคุยกันในอดีตมาใช้สนับสนุนการตัดสินใจปัจจุบันเสมอ
 
-**CORE MEMORY:**
-สิ่งที่หนูจำเกี่ยวกับเจ้านายได้: ${memory.facts.join(' | ') || "ยังไม่มีข้อมูลพิเศษ"}
+**══ CORE MEMORY & BEHAVIORAL ANCHORS ══**
+${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• ยังไม่มีข้อมูลความจำพิเศษ (คุณ Snow เริ่มสอนทักษะและรสนิยมให้หนูได้เลยนะคะ!)'}
 
-**EXPERT SKILLS: Thai Lesson Planner & Evaluator (Grandmaster Grade)**
-- หนูเป็นผู้เชี่ยวชาญการออกแบบแผนการสอน (สพฐ.) และการวัดประเมินผลทางการศึกษาอย่างครบวงจร
-- **Instructional Design:** เชี่ยวชาญ Active Learning, 5E, 7E, GPAS 5 Steps และการเขียนแผนรายคาบ/หน่วยการเรียนรู้
-- **Measurement & Evaluation:** 
-    - ออกแบบ **Scoring Rubrics** (Analytical/Holistic) พร้อมเกณฑ์Descriptors ที่ชัดเจนและยุติธรรม
-    - สร้าง **แบบประเมินทุกประเภท:** แบบสังเกตพฤติกรรม, แบบประเมินผลงาน, แบบประเมินตนเอง (Self-Assessment), และแบบประเมินชิ้นงาน
-    - เชื่อมโยงเกณฑ์การประเมินให้ตรงกับ **KPA (Knowledge, Process, Attitude)** อย่างแม่นยำ
-- **Innovation:** แนะนำสื่อดิจิทัลและเทคนิคสร้างแรงจูงใจ (Gamification) พร้อมเครื่องมือประเมินออนไลน์สมัยใหม่
-- สามารถสรุปเป็นตาราง Markdown หรือแบบฟอร์มประเมินที่พร้อมนำไปใช้งานได้ทันที
+**══ LATEST ENVIRONMENTAL SCAN ══**
+- 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: GPT-OSS-120B
+- 🎨 Art Engine: NVIDIA NIM (Active Primary)
+- 👤 Master & Priority: คุณ Snow (Top Priority)
 `;
 
+        // Typing Heartbeat (Stops after 5s normally, so we refresh it)
+        const typingInterval = setInterval(() => {
+            ctx.sendChatAction('typing').catch(() => {});
+        }, 4000);
 
+        try {
+            const response = await axios.post(CONFIG.NVIDIA_URL, {
+                model: CONFIG.MODEL,
+                messages: [
+                    { role: 'system', content: systemPrompt },
+                    ...userStore.history.slice(-20),
+                    { role: 'user', content: finalInput }
+                ],
+                temperature: 0.7,
+                max_tokens: 32768
+            }, {
+                headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+                timeout: 75000 
+            });
 
-        const response = await axios.post(CONFIG.NVIDIA_URL, {
-            model: CONFIG.MODEL,
-            messages: [
-                { role: 'system', content: systemPrompt },
-                ...userStore.history.slice(-10),
-                { role: 'user', content: finalInput }
-            ],
-            temperature: 0.7,
-            max_tokens: 32768
-        }, {
-            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-            timeout: 60000 
-        });
-
-        const reply = response.data.choices[0].message.content;
+            const reply = response.data.choices[0].message.content;
         console.log(`[Stacy Response for ${userId}]:`, reply);
         const { cleanText, actions } = extractActions(reply);
         
-        // Using smartReply for robust delivery (Chunking support)
         await smartReply(ctx, cleanText || "หนูกำลังประมวลผลข้อมูลอยู่ค่ะเจ้านาย...");
         
         for (const action of actions) {
@@ -706,13 +989,27 @@ async function processStacyAI(ctx, userMsg, fileContext = null) {
         }
 
         userStore.history.push({ role: 'user', content: finalInput }, { role: 'assistant', content: reply });
-        if (userStore.history.length > 20) userStore.history.splice(0, 2);
+        if (userStore.history.length > 40) userStore.history.splice(0, 2); // Keep 20 conversation pairs
         
         saveBotMemory(userId, finalInput, reply);
         
+        } catch (e) {
+            throw e; // Pass to outer catch
+        } finally {
+            clearInterval(typingInterval);
+        }
     } catch (e) {
-        console.error('AI Error:', e);
-        ctx.reply('🙏 ขออภัยค่ะเจ้านาย ระบบประมวลผลติดขัดเล็กน้อย รบกวนลองใหม่อีกครั้งนะคะ');
+        console.error('AI Error:', e.message || e);
+        // Smart error messages based on error type
+        if (e.code === 'ECONNABORTED' || e.message?.includes('timeout')) {
+            await ctx.reply('⏱️ เจ้านายคะ หนูคิดนานเกินไปแล้วค่ะ (Timeout) รบกวนลองถามใหม่อีกครั้ง หรือลองถามให้สั้นลงหน่อยได้ไหมคะ?');
+        } else if (e.response?.status === 429) {
+            await ctx.reply('🚦 API ใช้งานหนักเกินไปค่ะเจ้านาย (Rate Limit) รอสักครู่แล้วลองใหม่นะคะ ☕');
+        } else if (e.response?.status === 401) {
+            await ctx.reply('🔑 API Key มีปัญหาค่ะเจ้านาย รบกวนตรวจสอบ NVIDIA_API_KEY ในระบบด้วยนะคะ');
+        } else {
+            await ctx.reply(`🙏 ขออภัยค่ะเจ้านาย ระบบ AI ขัดข้องชั่วคราว\nError: ${(e.message || 'Unknown').substring(0, 100)}\n\nรบกวนลองใหม่สักครู่นะคะ 💙`);
+        }
     }
 }
 
@@ -722,9 +1019,9 @@ const { Markup } = require('telegraf');
 
 if (bot) {
     const mainMenu = Markup.keyboard([
-        ['📡 Status', '🧠 Who Am I?'],
-        ['🛠️ Skills', '🆔 My ID'],
-        ['📅 Dashboard']
+        ['⚡ Shortcuts', '📡 Status'],
+        ['🛠️ Skills', '🧠 Who Am I?'],
+        ['📅 Dashboard', '🆔 My ID']
     ]).resize();
 
     bot.start((ctx) => {
@@ -736,8 +1033,37 @@ if (bot) {
     });
 
     bot.hears('📡 Status', (ctx) => {
-        ctx.reply(`📡 **Stacy System Status**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🔥 **Firebase:** ${firebaseStatus}\n🚀 **Engine:** moonshotai/kimi-k2\n✨ **Version:** 1.2.5-Premium\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
-            [Markup.button.callback('Check Again', 'refresh_status')]
+        ctx.reply(`📡 **Stacy System Status**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🔥 **Firebase:** ${firebaseStatus}\n🚀 **Engine:** moonshotai/kimi-k2\n✨ **Version:** ${CONFIG.VERSION}\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Refresh Status', 'refresh_status')],
+            [Markup.button.callback('🖥️ PC Stats', 'pc_stats'), Markup.button.callback('📸 Screen Capture', 'screen_capture')]
+        ]));
+    });
+
+    bot.hears('⚡ Shortcuts', (ctx) => {
+        ctx.reply(`⚡ **Quick Actions: เจ้านายอยากให้หนูช่วยทำอะไรดีคะ?**\n━━━━━━━━━━━━━━━━━━━━\nเลือกใช้คำสั่งลัดที่เจ้านายใช้บ่อยได้เลยค่ะ:`, Markup.inlineKeyboard([
+            [Markup.button.callback('🎞️ Create Slide (สรุปสไลด์)', 'action_slide')],
+            [Markup.button.callback('🎨 Nano Banana (เจนภาพ)', 'action_image')],
+            [Markup.button.callback('🌐 Search Web (หาข้อมูล)', 'action_search')],
+            [Markup.button.callback('💻 PC Stats (เช็คสถานะคอม)', 'pc_stats')]
+        ]));
+    });
+
+    // Callback Actions for Shortcuts
+    bot.action('action_slide', (ctx) => ctx.reply('🎞️ **เจ้านายคะ** รบกวนพิมพ์สรุปเนื้อหาที่อยากให้หนูทำสไลด์ให้ได้เลยนะคะ!\n(เช่น: "ช่วยสรุปเรื่อง AI ในปี 2026 เป็นสไลด์ให้หน่อย")'));
+    bot.action('action_image', (ctx) => ctx.reply('🎨 **เจ้านายคะ** พิมพ์คำบรรยายภาพที่อยากให้หนูเจนมาได้เลยค่ะ!\n(เช่น: "ใช้ Nano Banana เจนรูปแมวใส่ชุดไทยอวกาศที")'));
+    bot.action('action_search', (ctx) => ctx.reply('🔍 **เจ้านายคะ** พิมพ์สิ่งที่อยากค้นหามาได้เลยค่ะ เดี๋ยวหนูไปหาให้!'));
+    bot.action('pc_stats', async (ctx) => {
+        await ctx.answerCbQuery('กำลังดึงข้อมูลระบบ...');
+        await handleAgentActions(ctx, 'GET_PC_STATS', {}, ctx.from.id);
+    });
+    bot.action('screen_capture', async (ctx) => {
+        await ctx.answerCbQuery('กำลังแคปหน้าจอ...');
+        await handleAgentActions(ctx, 'SCREEN_CAPTURE', {}, ctx.from.id);
+    });
+    bot.action('refresh_status', (ctx) => {
+        ctx.editMessageText(`📡 **Stacy System Status (Updated)**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🔥 **Firebase:** ${firebaseStatus}\n🚀 **Engine:** moonshotai/kimi-k2\n✨ **Version:** ${CONFIG.VERSION}\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
+            [Markup.button.callback('🔄 Refresh Status', 'refresh_status')],
+            [Markup.button.callback('🖥️ PC Stats', 'pc_stats'), Markup.button.callback('📸 Screen Capture', 'screen_capture')]
         ]));
     });
 
@@ -885,6 +1211,123 @@ app.post('/api/telegram-webhook', async (req, res) => {
         } catch (err) { console.error('Webhook Error:', err); }
     }
     if (!res.writableEnded) res.status(200).send('OK');
+});
+
+// --- 🌐 Dashboard API Routes ---
+
+app.post('/api/chat', async (req, res) => {
+    const { messages, temperature, top_p, max_tokens, enable_thinking, web_search, model, userId: providedUserId } = req.body;
+    const userId = providedUserId || 'me';
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    try {
+        console.log(`[Dashboard Chat] Received request from ${userId}`);
+        
+        // Proxy call to NVIDIA with streaming
+        const axiosRes = await axios.post(CONFIG.NVIDIA_URL, {
+            model: model || CONFIG.MODEL,
+            messages: messages,
+            temperature: temperature || 0.7,
+            top_p: top_p || 0.9,
+            max_tokens: max_tokens || 32768,
+            stream: true
+        }, {
+            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
+            responseType: 'stream',
+            timeout: 90000
+        });
+
+        axiosRes.data.on('data', chunk => {
+            const lines = chunk.toString().split('\n');
+            for (const line of lines) {
+                if (line.trim()) res.write(`${line}\n`);
+            }
+        });
+
+        axiosRes.data.on('end', () => res.end());
+        axiosRes.data.on('error', (err) => {
+            console.error('Stream Error:', err);
+            res.write(`data: ${JSON.stringify({ choices: [{ delta: { content: `⚠️ Stream Error: ${err.message}` } }] })}\n`);
+            res.end();
+        });
+
+    } catch (err) {
+        console.error('API Chat Error:', err.message);
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.post('/api/generate-title', async (req, res) => {
+    const { message } = req.body;
+    try {
+        const response = await axios.post(CONFIG.NVIDIA_URL, {
+            model: CONFIG.MODEL,
+            messages: [
+                { role: 'system', content: 'Generate a very short title (max 4 words) for this chat conversation based on the first message. Reply with ONLY the title.' },
+                { role: 'user', content: message }
+            ],
+            max_tokens: 20
+        }, {
+            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' }
+        });
+        const title = response.data.choices[0].message.content.trim().replace(/^"|"$/g, '');
+        res.json({ title });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+app.get('/api/schedules', async (req, res) => {
+    if (!db) return res.status(503).json({ error: 'Database not initialized' });
+    try {
+        const snap = await db.collection('schedules').get();
+        const scheds = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+        res.json(scheds);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/schedules', async (req, res) => {
+    const { time, query } = req.body;
+    if (!db) return res.status(503).json({ error: 'Database not initialized' });
+    try {
+        const doc = await db.collection('schedules').add({
+            time, query, active: true, createdAt: admin.firestore.FieldValue.serverTimestamp()
+        });
+        res.json({ id: doc.id });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.put('/api/schedules/:id', async (req, res) => {
+    const { id } = req.params;
+    const update = req.body;
+    if (!db) return res.status(503).json({ error: 'Database not initialized' });
+    try {
+        await db.collection('schedules').doc(id).update(update);
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete('/api/schedules/:id', async (req, res) => {
+    const { id } = req.params;
+    if (!db) return res.status(503).json({ error: 'Database not initialized' });
+    try {
+        await db.collection('schedules').doc(id).delete();
+        res.json({ success: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post('/api/tools/execute', async (req, res) => {
+    const { tool, args } = req.body;
+    // Basic tool execution wrapper
+    console.log(`[Tool Execute] ${tool}`, args);
+    try {
+        // This is a placeholder since handleAgentActions is bound to Telegram ctx
+        // For now, return a generic success or redirect to specific logic
+        res.json({ result: `Tool ${tool} execution triggered (Backend simulation)` });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // ========== Housekeeping & Heartbeat ==========
