@@ -90,7 +90,9 @@ app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static('public'));
 
-const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN) : null;
+const bot = TELEGRAM_TOKEN ? new Telegraf(TELEGRAM_TOKEN, {
+    handlerTimeout: 600000 // 10 minutes for long thinking AI
+}) : null;
 const tgContexts = new Map(); // Store conversation history
 
 // ========== Core Logic Pillars & Actions ==========
