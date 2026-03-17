@@ -1139,10 +1139,20 @@ async function handleAgentActions(ctx, action, data, userId) {
                 
                 await ctx.reply('📑 Stacy กำลังเข้าไปศึกษาแบบฟอร์ม/ข้อสอบ และสรุปข้อมูลไว้ที่หน้า Desktop ให้เจ้านายนะคะ...');
                 
-                formBrowser = await puppeteer.launch({ 
-                    headless: "new",
-                    args: ['--no-sandbox', '--disable-setuid-sandbox'] 
-                });
+                try {
+                    formBrowser = await puppeteer.launch({ 
+                        headless: "new",
+                        args: ['--no-sandbox', '--disable-setuid-sandbox'] 
+                    });
+                } catch (launchErr) {
+                    console.error("Puppeteer default launch failed, trying fallback...", launchErr);
+                    // Fallback for some hosting environments (like Render)
+                    formBrowser = await puppeteer.launch({
+                        headless: "new",
+                        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/google-chrome',
+                        args: ['--no-sandbox', '--disable-setuid-sandbox']
+                    });
+                }
                 const page = await formBrowser.newPage();
                 await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
                 
