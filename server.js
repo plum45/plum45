@@ -127,8 +127,8 @@ async function getBotMemory(userId) {
 
 function extractActions(text) {
     const actions = [];
-    // More robust regex to catch actions even with multiline JSON or varied spacing
-    const regex = /\[ACTION:\s*(\w+)\s*({[\s\S]*?})\]/g;
+    // More robust regex: allow spaces after [ and before ]
+    const regex = /\[\s*ACTION:\s*(\w+)\s*({[\s\S]*?})\s*\]/g;
     let match;
     while ((match = regex.exec(text)) !== null) {
         try {
@@ -137,7 +137,7 @@ function extractActions(text) {
             console.error('Action Parse Error:', e, 'Raw JSON:', match[2]); 
         }
     }
-    const cleanText = text.replace(/\[ACTION:[\s\S]*?\]/g, '').trim();
+    const cleanText = text.replace(/\[\s*ACTION:[\s\S]*?\]/g, '').trim();
     return { cleanText, actions };
 }
 
@@ -656,25 +656,31 @@ async function handleAgentActions(ctx, action, data, userId) {
             try {
                 const fileName = data.filename || `report_${Date.now()}.xlsx`;
                 const filePath = path.join(__dirname, fileName);
-                const sheetData = data.data || [['Data Not Provided']]; // Expecting Array of Arrays or Objects
-                const sheetName = data.sheetName || 'Sheet1';
-
                 const wb = xlsx.utils.book_new();
-                let ws;
                 
-                // Determine if data is an array of objects or array of arrays
-                if (Array.isArray(sheetData) && sheetData.length > 0 && typeof sheetData[0] === 'object' && !Array.isArray(sheetData[0])) {
-                    ws = xlsx.utils.json_to_sheet(sheetData);
-                } else {
-                    ws = xlsx.utils.aoa_to_sheet(sheetData);
-                }
+                // Support for multiple sheets
+                const sheets = data.sheets || [{ 
+                    name: data.sheetName || 'Sheet1', 
+                    data: data.data || [['No Data']],
+                    merges: data.merges || [] // Format: [{ s: { r: 0, c: 0 }, e: { r: 0, c: 2 } }]
+                }];
+
+                sheets.forEach(s => {
+                    let ws;
+                    if (Array.isArray(s.data) && s.data.length > 0 && typeof s.data[0] === 'object' && !Array.isArray(s.data[0])) {
+                        ws = xlsx.utils.json_to_sheet(s.data);
+                    } else {
+                        ws = xlsx.utils.aoa_to_sheet(s.data);
+                    }
+                    if (s.merges) ws['!merges'] = s.merges;
+                    xlsx.utils.book_append_sheet(wb, ws, s.name);
+                });
                 
-                xlsx.utils.book_append_sheet(wb, ws, sheetName);
                 xlsx.writeFile(wb, filePath);
 
                 await ctx.replyWithDocument({ source: filePath });
-                await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${fileName}`);
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // Cleanup
+                await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${fileName} with ${sheets.length} sheets`);
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch (err) {
                 ctx.reply(`❌ ระบบสร้างไฟล์ Excel ขัดข้อง: ${err.message}`);
                 console.error('Excel Gen Error:', err);
@@ -685,10 +691,10 @@ async function handleAgentActions(ctx, action, data, userId) {
                 const fileName = data.filename || `document_${Date.now()}.docx`;
                 const filePath = path.join(__dirname, fileName);
                 const title = data.title || 'Untitled Document';
-                const sections = data.sections || []; // Array of { heading, text }
+                const sections = data.sections || []; // Array of { heading, text, table }
 
                 const children = [
-                    new Paragraph({ text: title, heading: HeadingLevel.TITLE }),
+                    new Paragraph({ text: title, heading: HeadingLevel.TITLE, alignment: docx.AlignmentType.CENTER }),
                     new Paragraph({ text: "" }),
                 ];
 
@@ -708,6 +714,17 @@ async function handleAgentActions(ctx, action, data, userId) {
                             }));
                         });
                     }
+                    if (s.table) {
+                        // Advanced: Add Table Support
+                        const tableRows = s.table.map(row => {
+                            return new docx.TableRow({
+                                children: row.map(cell => new docx.TableCell({
+                                    children: [new Paragraph(String(cell))],
+                                })),
+                            });
+                        });
+                        children.push(new docx.Table({ rows: tableRows, width: { size: 100, type: docx.WidthType.PERCENTAGE } }));
+                    }
                 });
 
                 const doc = new Document({ sections: [{ children }] });
@@ -716,7 +733,7 @@ async function handleAgentActions(ctx, action, data, userId) {
 
                 await ctx.replyWithDocument({ source: filePath });
                 await logToTerminal(userId, 'CREATE_WORD', `Generated: ${fileName}`);
-                if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // Cleanup
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
             } catch (err) {
                 ctx.reply(`❌ ระบบสร้างไฟล์ Word ขัดข้อง: ${err.message}`);
                 console.error('Word Gen Error:', err);
