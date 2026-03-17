@@ -35,10 +35,16 @@ const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY || 'nvapi-hMCxb0tXHTJ9jRmIt3uD
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN || '7435216335:AAEPclIdh6IatC228uK6I2X9m3-O82u_yks';
 const IS_RENDER = !!process.env.RENDER;
 
-// Ensure Documents folder exists for professional local organization
-const docDir = path.join(__dirname, 'Documents');
+// Master's Preferred Document Archive (OneDrive Support)
+const MASTER_DOC_PATH = "C:\\Users\\lgopl\\OneDrive\\เอกสาร\\stact doc";
+const docDir = IS_RENDER ? path.join(__dirname, 'Documents') : MASTER_DOC_PATH;
+
 if (!fs.existsSync(docDir)) {
-    fs.mkdirSync(docDir, { recursive: true });
+    try {
+        fs.mkdirSync(docDir, { recursive: true });
+    } catch (e) {
+        console.error("Critical: Failed to create docDir", e);
+    }
 }
 const PORT = CONFIG.PORT;
 
@@ -1098,7 +1104,8 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: GPT-OSS-120B
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
-- 📂 Root: ${__dirname} (ห้ามใช้ "/tmp/" บน Windows ให้ใช้พาธสัมพันธ์กับ Root แทนนะคะ)
+- 📂 Root: ${__dirname}
+- 📂 Archive: ${docDir} (Professional Storage)
 - 🎨 Art Engine: NVIDIA NIM (Active Primary)
 - 👤 Master & Priority: คุณ Snow (Top Priority)
 `;
@@ -1393,7 +1400,8 @@ app.post('/api/chat', async (req, res) => {
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
-- 📂 Root: ${__dirname} (ห้ามใช้ "/tmp/" บน Windows ให้ใช้พาธสัมพันธ์กับ Root แทนนะคะ)
+- 📂 Root: ${__dirname}
+- 📂 Archive: ${docDir} (Professional Storage)
 
 ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map(f => `• ${f}`).join('\n')}` : ''}
 `;
