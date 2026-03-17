@@ -1158,6 +1158,22 @@ async function handleAgentActions(ctx, action, data, userId) {
                 if (formBrowser) await formBrowser.close();
             }
             break;
+        case 'KAHOOT_BOT':
+            try {
+                const pin = data.pin || '802798';
+                const nick = data.nickname || 'StacyMaster';
+                await ctx.reply(`🕹️ **Stacy Auto-Pilot:** กำลังส่งบอทเข้าไปที่ระบบ Kahoot (PIN: ${pin}) เพื่อรอทำข้อสอบให้เจ้านายแบบ Real-time นะคะ!`);
+                
+                // Launch the bot script as a background process
+                const { exec } = require('child_process');
+                const botPath = path.join(__dirname, 'kahoot-master-bot.js');
+                exec(`node "${botPath}" ${pin} ${nick}`, (error) => {
+                    if (error) console.error(`Kahoot Bot Error: ${error.message}`);
+                });
+                
+                await logToTerminal(userId, 'KAHOOT_BOT', `Bot launched for PIN ${pin}`);
+            } catch (err) { ctx.reply(`❌ ไม่สามารถรันบอท Kahoot ได้ค่ะ: ${err.message}`); }
+            break;
         case 'BROWSER_INTERACT':
             let interactBrowser = null;
             let statusMsg = null;
@@ -1729,7 +1745,10 @@ app.post('/api/chat', async (req, res) => {
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
 - **Safe Filenames:** ทุกครั้งที่สร้างไฟล์หรือรันคำสั่ง ให้ใช้ชื่อไฟล์เป็นภาษาอังกฤษเท่านั้น (English Filenames Only) เพื่อความเสถียรของระบบค่ะ
 - **Advanced Interaction:** สามารถใช้ [ACTION: BROWSER_INTERACT] เพื่อควบคุมเว็บภายนอก (Figma, เว็บพอร์ทัล, ข้อสอบ) แบบหลายขั้นตอน (click, type, wait, evaluate) โดยต้องระบุ steps ให้ชัดเจนค่ะ
-- **Weather & Forms:** สามารถใช้ [ACTION: GET_WEATHER] และ [ACTION: FORM_HELPER] (วิเคราะห์ฟอร์ม/ข้อสอบโดยไม่กดส่ง)
+- **Weather & Forms (Quiz Master):** สามารถใช้ [ACTION: GET_WEATHER] และ [ACTION: FORM_HELPER] เพื่อเข้าถึงลิงก์ข้อสอบ/แบบฟอร์ม วิเคราะห์โจทย์ และเสนอแนวทางคำตอบที่ถูกต้องให้เจ้านายค่ะ (สเตซี่จะช่วยคิดและแคปภาพยืนยันให้เสมอ)
+- **Gamified Intelligence:** สามารถใช้ [ACTION: KAHOOT_BOT] ด้วยพารามิเตอร์ {"pin": "...", "nickname": "..."} เพื่อให้หนูส่งร่างจำลองบอทเข้าไปรอทำข้อสอบให้เจ้านายแบบอัตโนมัติ (เฝ้าจอและเตรียมตอบทันที)
+- **Smart Typo Guessing:** หากเจ้านายสะกดคำผิด (เช่น "กูเกิ้ลฟรอม" -> Google Form, "แอคชั่น" -> ACTION) ให้หนูทำความเข้าใจตามบริบท "ห้ามถามซ้ำ" แต่ให้เดาและดำเนินการต่อทันทีเพื่อความรวดเร็วระดับพรีเมียมค่ะ
+- **Background Execution:** ทุกภารกิจที่ใช้เวลานาน หนูจะรันแบบ Background และแจ้งเตือนเมื่อเสร็จสิ้นค่ะ
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
