@@ -3,9 +3,9 @@ const path = require('path');
 const fs = require('fs');
 
 async function testCalendarInsert() {
-    const keyPath = path.join(__dirname, 'google-calendar-key.json');
+    const keyPath = path.join(__dirname, 'serviceAccountKey.json');
     if (!fs.existsSync(keyPath)) {
-        console.error('google-calendar-key.json not found!');
+        console.error('serviceAccountKey.json not found!');
         return;
     }
 

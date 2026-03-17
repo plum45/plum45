@@ -361,9 +361,11 @@ async function handleAgentActions(ctx, action, data, userId) {
                 let apiSyncSuccess = false;
 
                 const calendarKeyEnv = process.env.GOOGLE_CALENDAR_KEY_JSON;
-                const calendarKeyPath = path.join(__dirname, 'google-calendar-key.json');
+                const primaryKeyPath = path.join(__dirname, 'google-calendar-key.json');
+                const fallbackKeyPath = path.join(__dirname, 'serviceAccountKey.json');
+                const calendarKeyPath = fs.existsSync(primaryKeyPath) ? primaryKeyPath : (fs.existsSync(fallbackKeyPath) ? fallbackKeyPath : null);
 
-                if (calendarKeyEnv || fs.existsSync(calendarKeyPath)) {
+                if (calendarKeyEnv || calendarKeyPath) {
                     console.log(`📅 [CALENDAR] Using Service Account API (Primary)`);
                     try {
                         let authConfig;
