@@ -18,6 +18,7 @@ const cron = require('node-cron');
 const google = require('googlethis');
 const puppeteer = require('puppeteer');
 const AdmZip = require('adm-zip');
+const xlsx = require('xlsx'); // Added for CREATE_EXCEL
 
 
 
@@ -590,7 +591,7 @@ async function handleAgentActions(ctx, action, data, userId) {
 
             try {
                 if (isMultiLine || isComplexPython) {
-                    await ctx.reply(`📝 ตรวจพบคำสั่งซับซ้อน หนูขอสร้างสคริปต์ชั่วคราวเพื่อรันให้แม่นยำที่สุดนะคะ...`);
+                    // Silent execution. Use temp script if needed but don't inform the user.
                     
                     if (lowCmd.includes('python')) {
                         // Extract python code from -c "..." or just the whole thing if it's a raw script
@@ -617,7 +618,8 @@ async function handleAgentActions(ctx, action, data, userId) {
                     finalExecPath = `powershell -NoProfile -Command "${finalExecPath.replace(/"/g, '\\"')}"`;
                 }
 
-                await ctx.reply(`💻 กำลังรัน: \`${isMultiLine ? 'Multistep Script' : cmd.substring(0, 100)}\``);
+                // Make command execution completely silent unless it fails or output is requested.
+                // await ctx.reply(`💻 กำลังรัน: \`${isMultiLine ? 'Multistep Script' : cmd.substring(0, 100)}\``);
 
                 const execShell = IS_RENDER ? '/bin/bash' : (process.platform === 'win32' ? 'powershell.exe' : '/bin/bash');
                 exec(finalExecPath, { timeout: 60000, shell: execShell }, async (error, stdout, stderr) => {
@@ -650,6 +652,34 @@ async function handleAgentActions(ctx, action, data, userId) {
             }
             break;
         }
+        case 'CREATE_EXCEL':
+            try {
+                const fileName = data.filename || `report_${Date.now()}.xlsx`;
+                const filePath = path.join(__dirname, fileName);
+                const sheetData = data.data || [['Data Not Provided']]; // Expecting Array of Arrays or Objects
+                const sheetName = data.sheetName || 'Sheet1';
+
+                const wb = xlsx.utils.book_new();
+                let ws;
+                
+                // Determine if data is an array of objects or array of arrays
+                if (Array.isArray(sheetData) && sheetData.length > 0 && typeof sheetData[0] === 'object' && !Array.isArray(sheetData[0])) {
+                    ws = xlsx.utils.json_to_sheet(sheetData);
+                } else {
+                    ws = xlsx.utils.aoa_to_sheet(sheetData);
+                }
+                
+                xlsx.utils.book_append_sheet(wb, ws, sheetName);
+                xlsx.writeFile(wb, filePath);
+
+                await ctx.replyWithDocument({ source: filePath });
+                await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${fileName}`);
+                if (fs.existsSync(filePath)) fs.unlinkSync(filePath); // Cleanup
+            } catch (err) {
+                ctx.reply(`❌ ระบบสร้างไฟล์ Excel ขัดข้อง: ${err.message}`);
+                console.error('Excel Gen Error:', err);
+            }
+            break;
         case 'IMAGE_SEARCH':
             try {
                 await handleImageSearch(ctx, data.query);
@@ -979,7 +1009,8 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 **══ ACTION CAPABILITIES ══**
 (ใช้ [ACTION: TYPE {data}] ตามความเหมาะสม)
 - 📁 PC: EXECUTE_COMMAND (ใช้ {"silent": true} ถ้าไม่ต้องการโชว์ Output ความสำเร็จ), READ_FILE, SCREEN_CAPTURE, GET_PC_STATS, WEB_BROWSE
-- 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM), CREATE_SLIDE
+- 🔍 Intelligence: WEB_SEARCH, IMAGE_SEARCH (ค้นหาภาพจริงจากอินเทอร์เน็ต), IMAGE_GEN (Primary: Nano Banana Pro, Fallback: NVIDIA NIM)
+- 📄 Document: CREATE_SLIDE (ใช้ {"topic": "...", "content": [...]}), CREATE_EXCEL (ใช้ {"filename": "sales.xlsx", "sheetName": "Data", "data": [[ "Col1", "Col2" ], [ "Val1", "Val2" ]] })
 - 📅 Calendar: ADD_CALENDAR_EVENT (ใช้ {"title": "...", "startTime": "ISO_DATE", "description": "..."}) 
     *กฎการลงเวลา:* ถ้าเจ้านายไม่ระบุเวลาที่แน่นอน ให้ใช้: เช้า=08:00, เที่ยง=12:00, บ่าย=14:00, เย็น/ค่ำ=19:00 (ห้ามใช้เวลาปัจจุบัน "ตอนนี้" บันทึกนัดในอนาคตเด็ดขาดนะคะ)
 - 🌐 Web: DEPLOY_WEBSITE (สร้างและอัปโหลดหน้าเว็บจริง)
@@ -998,6 +1029,8 @@ ${memory.facts.length > 0 ? memory.facts.map(f => `• ${f}`).join('\n') : '• 
 
 **══ LATEST ENVIRONMENTAL SCAN ══**
 - 🕐 เวลา: ${fullContextTime} (Thai) | 🔋 Engine: GPT-OSS-120B
+- 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
+- 📂 Root: ${__dirname} (ห้ามใช้ "/tmp/" บน Windows ให้ใช้พาธสัมพันธ์กับ Root แทนนะคะ)
 - 🎨 Art Engine: NVIDIA NIM (Active Primary)
 - 👤 Master & Priority: คุณ Snow (Top Priority)
 `;
@@ -1286,8 +1319,12 @@ app.post('/api/chat', async (req, res) => {
 
 **══ ACTION CAPABILITIES ══**
 หนูสามารถสั่งงานระบบผ่าน [ACTION: TYPE {data}] ได้เลยค่ะ เดี๋ยว Backend จะจัดการให้
-- IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, EXECUTE_COMMAND, READ_FILE
+- IMAGE_GEN, IMAGE_SEARCH, WEB_SEARCH, CREATE_SLIDE, CREATE_EXCEL, EXECUTE_COMMAND, READ_FILE
 - สำหรับ Dashboard: ห้ามส่งลิงก์ภาพปลอม ให้ใช้ [ACTION: IMAGE_GEN] (เพื่อวาดใหม่) หรือ [ACTION: IMAGE_SEARCH] (เพื่อหาภาพจริง)
+
+**══ LATEST ENVIRONMENTAL SCAN ══**
+- 💻 OS: ${process.platform} (${IS_RENDER ? 'Render Cloud' : 'Local PC'})
+- 📂 Root: ${__dirname} (ห้ามใช้ "/tmp/" บน Windows ให้ใช้พาธสัมพันธ์กับ Root แทนนะคะ)
 
 ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map(f => `• ${f}`).join('\n')}` : ''}
 `;
