@@ -672,12 +672,12 @@ async function handleAgentActions(ctx, action, data, userId) {
                         return;
                     }
 
-                    // v1.5.0 Silent on Success: Only notify completion unless data requested
-                    if (!data.silent && !lowCmd.includes('echo') && !lowCmd.includes('print(')) {
-                         // If it's a "silent" request or just a background task, don't flood the chat
-                         // But for now, we follow "Show only on failure" for most commands
-                    } else if (!data.silent) {
-                        await smartReply(ctx, `🖥️ ผลลัพธ์จากการรัน:\n\`\`\`\n${output.substring(0, 3500)}\n\`\`\``);
+                    // [v1.5.3 Silent Success Enforced]
+                    // If not explicitly requested to show, or if it's a "tell-tale" command like echo/print, we stay silent on success.
+                    if (data.showOutput || (data.silent === false)) {
+                        await smartReply(ctx, `🖥️ ผลลัพธ์จากการรัน:\n\`\`\`\n${output.trim().substring(0, 3500)}\n\`\`\``);
+                    } else {
+                        console.log(`✅ [EXEC SUCCESS]: ${cmd} (Silent Mode)`);
                     }
                 });
             } catch (err) {
@@ -1301,6 +1301,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 **══ ARCHITECT & AUTOMATION SAFETY RULES ══**
 - **System Integrity**: ห้ามลบไฟล์ระบบหรือโฟลเดอร์ Windows โดยเด็ดขาด
 - **Data Privacy (NEW)**: หากต้องทำงานที่เกี่ยวข้องกับข้อมูลส่วนตัวหรือการตั้งค่าเครื่องที่ละเอียดอ่อน **ต้องขออนุญาตเจ้านายก่อนทุกครั้ง** ห้ามทำเองโดยพละการค่ะ
+- **Silent Success (Protocol 1.5.3)**: ห้ามแสดงคำสั่งเทคนิค (Action/Command strings) ในข้อความแชทปกติเด็ดขาด ถ้างานสำเร็จให้บอกแค่ "เรียบร้อยค่ะ" หรือสรุปผลงานเป็นภาษามนุษย์เท่านั้น
 - **English First Filenames**: ให้ใช้ชื่อไฟล์เป็น **ภาษาอังกฤษ** เท่านั้น (เช่น automation_log.docx) เพื่อความเสถียรของระบบ
 - **Error Transparency**: ถ้าคำสั่ง Execution ล้มเหลว ให้โชว์ Error ให้เจ้านายเห็นเพื่อช่วยกันแก้
 
