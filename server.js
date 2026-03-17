@@ -223,8 +223,94 @@ async function sendSmartImage(ctx, source, caption, filename = 'stacy_capture.pn
 }
 
 
+// ========== 🛰️ Cloud-to-Local Bridge (The Architect Bridge) ==========
+
+/**
+ * Queue an action for the Local Worker
+ */
+async function queueLocalAction(userId, action, data) {
+    if (!db) return;
+    try {
+        const queueRef = db.collection('userActivities').doc(String(userId)).collection('pendingActions');
+        await queueRef.add({
+            action,
+            data,
+            status: 'pending',
+            timestamp: admin.firestore.FieldValue.serverTimestamp()
+        });
+        console.log(`📡 [QUEUE]: Sent ${action} to Local Worker for User ${userId}`);
+    } catch (e) {
+        console.error('❌ Failed to queue local action:', e);
+    }
+}
+
+/**
+ * Local Worker Listener: Runs on Local PC to execute queued commands
+ */
+function startLocalWorker(userId) {
+    if (IS_RENDER || !db) return;
+    
+    console.log(`🛠️ [WORKER]: Stacy Local Worker started for User ${userId}`);
+    const queueRef = db.collection('userActivities').doc(String(userId)).collection('pendingActions');
+    
+    queueRef.where('status', '==', 'pending').onSnapshot(async (snapshot) => {
+        for (const change of snapshot.docChanges()) {
+            if (change.type === 'added') {
+                const doc = change.doc;
+                const task = doc.data();
+                console.log(`🚀 [WORKER]: Executing ${task.action}...`);
+                
+                try {
+                    // Update status to processing
+                    await doc.ref.update({ status: 'processing' });
+                    
+                    // We need a dummy context or a way to report back
+                    // For now, let's create a "Mock Context" that logs to Firestore terminalLogs
+                    const mockCtx = {
+                        from: { id: userId },
+                        chat: { id: userId },
+                        reply: async (msg) => {
+                            console.log(`[WORKER REPLY]: ${msg}`);
+                            await logToTerminal(userId, `STACY_LOCAL_REPLY`, msg);
+                        },
+                        telegram: {
+                            sendDocument: () => {},
+                            sendPhoto: () => {}
+                        },
+                        // Fallback for file missions
+                        replyWithDocument: async (docInfo, extra) => {
+                            console.log(`[WORKER FILE]: ${docInfo.filename || 'file'}`);
+                            await logToTerminal(userId, `STACY_LOCAL_FILE`, `Generated: ${docInfo.filename}`);
+                        },
+                        replyWithPhoto: async (photoInfo, extra) => {
+                            console.log(`[WORKER PHOTO]: Capture`);
+                            await logToTerminal(userId, `STACY_LOCAL_PHOTO`, `Captured screen`);
+                        }
+                    };
+
+                    await handleAgentActions(mockCtx, task.action, task.data, userId);
+                    await doc.ref.update({ status: 'completed' });
+                } catch (err) {
+                    console.error(`❌ [WORKER ERROR]:`, err);
+                    await doc.ref.update({ status: 'failed', error: err.message });
+                }
+            }
+        }
+    });
+}
+
+
 async function handleAgentActions(ctx, action, data, userId) {
     if (!db) return;
+
+    // --- 🌍 Bridge Logic: Forward local tasks to the Worker if we are on Cloud ---
+    const localActions = ['EXECUTE_COMMAND', 'SCREEN_CAPTURE', 'GET_PC_STATS', 'SYSTEM_CONTROL'];
+    if (IS_RENDER && localActions.includes(action)) {
+        await ctx.reply(`📡 **Forwarding to Local PC:** Stacy Cloud กำลังส่งคำสั่ง \`${action}\` ไปประมวลผลที่คอมพิวเตอร์ที่บ้านของเจ้านายนะคะ...`);
+        await queueLocalAction(userId, action, data);
+        return;
+    }
+
     const userRef = db.collection('userActivities').doc(String(userId));
 
     switch (action) {
@@ -1780,9 +1866,10 @@ app.listen(PORT, async () => {
     
     if (bot) {
         if (!IS_RENDER) {
-            bot.launch()
-               .then(() => console.log("🤖 Bot Polling Started (Local PC Mode)"))
-               .catch(err => console.error("❌ Bot Launch Failed:", err));
+            // Local Mode: DO NOT polling Telegram to avoid 409 Conflict.
+            // Instead, act as a Worker listening to Firestore.
+            console.log("🛠️ Stacy Local Mode: Acting as Background Worker (Listening to Firestore)");
+            startLocalWorker(8245980204); // Default User ID (Snow)
         } else {
             // Render Cloud: Auto-configure Webhook
             const domain = process.env.RENDER_EXTERNAL_HOSTNAME || `${process.env.RENDER_SERVICE_NAME}.onrender.com`;
@@ -1790,6 +1877,7 @@ app.listen(PORT, async () => {
                 const webhookPath = `/api/telegram-webhook`;
                 const webhookUrl = `https://${domain}${webhookPath}`;
                 try {
+                    await bot.telegram.deleteWebhook(); // Clear old ones
                     await bot.telegram.setWebhook(webhookUrl);
                     console.log(`🌐 Webhook Set Successfully: ${webhookUrl}`);
                 } catch (e) {
