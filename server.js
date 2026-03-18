@@ -1114,6 +1114,14 @@ async function handleAgentActions(ctx, action, data, userId) {
             const handleKahootBot = require('./lib/actions/kahootBot');
             await handleKahootBot({ ctx, data, userId, logToTerminal });
             break;
+        case 'CODE_EXECUTOR':
+            const { handleCodeExecutor } = require('./lib/actions/codeExecutor');
+            await handleCodeExecutor({ ctx, data, userId, logToTerminal });
+            break;
+        case 'FORM_SOLVER':
+            const { handleFormSolver } = require('./lib/actions/formSolver');
+            await handleFormSolver({ ctx, data, userId, sendSmartImage, logToTerminal, aiContext: data.suggestion });
+            break;
         case 'BROWSER_INTERACT':
             const handleBrowserInteract = require('./lib/actions/browserInteract');
             await handleBrowserInteract({ ctx, data, userId, sendSmartImage, logToTerminal });
