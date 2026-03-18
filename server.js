@@ -1136,6 +1136,72 @@ async function handleAgentActions(ctx, action, data, userId) {
             const handleBrowserInteract = require('./lib/actions/browserInteract');
             await handleBrowserInteract({ ctx, data, userId, sendSmartImage, logToTerminal });
             break;
+        case 'MEDIA_CONTROL':
+            try {
+                const mediaAction = data.action; // PLAY_PAUSE, NEXT, PREV, STOP, VOL_UP, VOL_DOWN
+                let vKey = '';
+                switch (mediaAction) {
+                    case 'PLAY_PAUSE': vKey = '0xB3'; break;
+                    case 'NEXT': vKey = '0xB0'; break;
+                    case 'PREV': vKey = '0xB1'; break;
+                    case 'STOP': vKey = '0xB2'; break;
+                    case 'VOL_UP': vKey = '0xAF'; break;
+                    case 'VOL_DOWN': vKey = '0xAE'; break;
+                    case 'MUTE': vKey = '0xAD'; break;
+                }
+                
+                if (vKey) {
+                    const psCmd = `Add-Type -TypeDefinition "using System; using System.Runtime.InteropServices; public class Keyboard { [DllImport(\\\"user32.dll\\\")] public static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo); }"; [Keyboard]::keybd_event(${vKey}, 0, 0, 0)`;
+                    if (IS_RENDER) {
+                        await ctx.reply(`📡 ส่งสัญญาณควบคุมสื่อ (${mediaAction}) ไปยังคอมพิวเตอร์เจ้านายนะคะ...`);
+                        await queueLocalAction(userId, 'EXECUTE_COMMAND', { command: `powershell -Command "${psCmd}"`, silent: true });
+                    } else {
+                        exec(`powershell -Command "${psCmd}"`);
+                        if (!data.silent) await ctx.reply(`🎵 ดำเนินการให้แล้วนะคะเจ้านาย! (${mediaAction})`);
+                    }
+                }
+            } catch (err) { ctx.reply(`❌ ควบคุมสื่อขัดข้อง: ${err.message}`); }
+            break;
+        case 'YOUTUBE_OPEN':
+            try {
+                const { topic, channel, query, url } = data;
+                let targetUrl = url;
+                const searchLabel = topic && channel ? `เรื่อง "${topic}" จากช่อง "${channel}"` : (query || topic || channel);
+                
+                if (!targetUrl) {
+                    let fullQuery = query || "";
+                    if (topic && channel) fullQuery = `site:youtube.com "${channel}" "${topic}"`;
+                    else if (topic) fullQuery = `${topic} youtube`;
+                    else if (channel) fullQuery = `channel ${channel} youtube`;
+                    
+                    if (fullQuery) {
+                        if (ctx) await ctx.sendChatAction('typing');
+                        const results = await performSearch(fullQuery);
+                        // Enhanced URL extraction for YouTube
+                        const ytRegex = /🔗 (https:\/\/(?:www\.)?youtube\.com\/watch\?v=[^\s\n&]+)/g;
+                        const shortRegex = /🔗 (https:\/\/youtu\.be\/[^\s\n?]+)/g;
+                        
+                        let matches = [...results.matchAll(ytRegex), ...results.matchAll(shortRegex)];
+                        if (matches.length > 0) {
+                            targetUrl = matches[0][1];
+                        }
+                    }
+                }
+                
+                if (targetUrl) {
+                    const notifyMsg = `🎬 **สมองกลสเตซี่กำลังเปิด:** ${searchLabel}\n🔗 **Link:** ${targetUrl}`;
+                    if (IS_RENDER) {
+                        await ctx.reply(`📡 ส่งลิงก์ไปยังคอมพิวเตอร์เจ้านายนะคะ...\n${notifyMsg}`);
+                        await queueLocalAction(userId, 'EXECUTE_COMMAND', { command: `start "" "${targetUrl}"`, silent: true });
+                    } else {
+                        exec(`start "" "${targetUrl}"`);
+                        await ctx.reply(`✅ เปิดให้แล้วนะคะเจ้านาย! ✨\n${notifyMsg}`);
+                    }
+                } else {
+                    await ctx.reply(`🔍 หนูพยายามหาคลิป ${searchLabel} อย่างสุดความสามารถแล้วแต่ยังไม่เจอนะคะเจ้านาย ลองระบุชื่อช่องหรือหัวข้อให้ชัดขึ้นได้ไหมคะ? 🙏`);
+                }
+            } catch (err) { ctx.reply(`❌ ระบบค้นหา YouTube ขัดข้อง: ${err.message}`); }
+            break;
         case 'SYSTEM_CONTROL':
             try {
                 const action = data.action; // 'SHUTDOWN', 'RESTART', 'WAKE'
@@ -1313,6 +1379,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
     *   **FORM_HELPER**: วิเคราะห์แบบฟอร์มเบื้องต้นและแคปภาพ
     *   **KAHOOT_BOT**: (NEW) ปล่อยบอทไปถล่ม Kahoot หรือช่วยเจ้านายเล่น Quiz แบบ Real-time {"pin": "...", "name": "..."}
 - 📅 Calendar: ADD_CALENDAR_EVENT (ปีปัจจุบัน 2026 เท่านั้น!)
+- 🎵 Music & Video: MEDIA_CONTROL (ควบคุมเพลง {"action": "PLAY_PAUSE|NEXT|PREV|VOL_UP|VOL_DOWN"}), YOUTUBE_OPEN (ค้นหาคลิปและเปิด {"topic": "เรื่องที่จะดู", "channel": "ชื่อช่อง (ถ้ามี)", "query": "..."})
 - 🌤️ Weather: GET_WEATHER 
 - 🧠 Memory: ADD_MEMORY_FACT, CREATE_SKILL, SET_IDENTITY
 
@@ -1630,6 +1697,7 @@ app.post('/api/chat', async (req, res) => {
 - 📄 **งานเอกสาร**: CREATE_SLIDE, CREATE_EXCEL, CREATE_WORD
 - 📝 **งานวิชาการ**: FORM_SOLVER (วิเคราะห์ข้อสอบเชิงลึก), KAHOOT_BOT (บอทช่วยเล่นเกมควิซ), FORM_HELPER (วิเคราะห์ฟอร์ม), WEB_ANALYZER (วิจัยเว็บละเอียด)
 - 📅 **งานปฏิทิน**: ADD_CALENDAR_EVENT (ปี 2026 เท่านั้น!), WORK_LOG
+- 🎵 **คุมสื่อ & YT**: MEDIA_CONTROL (PLAY_PAUSE|NEXT|PREV), YOUTUBE_OPEN (ฉลาดพิเศษ ระบุ channel/topic ได้)
 - **Intelligence Focus:** เมื่อสั่ง Excel หนูต้องวิเคราะห์ข้อมูลเพื่อแบ่งหมวดหมู่ให้เป็นมืออาชีพที่สุด
 - **Safe Filenames:** ทุกครั้งที่สร้างไฟล์ ให้ใช้ชื่อไฟล์เป็นภาษาอังกฤษเท่านั้น
 - **Advanced Interaction:** สามารถใช้ [ACTION: BROWSER_INTERACT] เพื่อควบคุมเว็บภายนอกแบบหลายขั้นตอน
