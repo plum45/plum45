@@ -28,8 +28,8 @@ const wol = require('wake_on_lan');
 // ========== Configuration & Global State ==========
 const CONFIG = {
     PORT: process.env.PORT || 10000,
-    VERSION: '1.5.0-ARCHITECT',
-    SYS_NAME: 'Stacy Architect v1.5.0',
+    VERSION: '2.1.0-HYBRID',
+    SYS_NAME: 'Stacy Architect v2.1.0',
     NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
     NVIDIA_IMAGE_URL: 'https://ai.api.nvidia.com/v1/genai/stabilityai/stable-diffusion-xl',
     MODEL: 'meta/llama-3.3-70b-instruct'
@@ -1799,10 +1799,19 @@ app.listen(PORT, async () => {
     
     if (bot) {
         if (!IS_RENDER) {
-            // Local Mode: DO NOT polling Telegram to avoid 409 Conflict.
-            // Instead, act as a Worker listening to Firestore.
-            console.log("🛠️ Stacy Local Mode: Acting as Background Worker (Listening to Firestore)");
-            startLocalWorker(8245980204); // Default User ID (Snow)
+            // Local Mode: Enable Polling for immediate responsiveness on local machine
+            try {
+                // Clear any existing Webhooks to allow Polling
+                await bot.telegram.deleteWebhook();
+                bot.launch();
+                console.log("🛠️ Stacy Local Mode: 🚀 Polling Started (Full UI + Automation)");
+                startLocalWorker(8245980204); // Default User ID (Snow)
+                
+                // Optional: Notify the master that Stacy is back online locally
+                bot.telegram.sendMessage(8245980204, "📢 **Stacy 2.1.0 Online!**\nรันบนเครื่องเจ้านายแบบ Local Polling แล้วนะคะ พร้อมรับใช้ทั้งวันทั้งคืนเลยค่ะจ๊ะ! 🕒");
+            } catch (e) {
+                console.error("❌ Failed to launch bot locally:", e.message);
+            }
         } else {
             // Render Cloud: Auto-configure Webhook
             const domain = process.env.RENDER_EXTERNAL_HOSTNAME || `${process.env.RENDER_SERVICE_NAME}.onrender.com`;
