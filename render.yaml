@@ -1,4 +1,4 @@
-# Render Blueprint (Native Node.js Implementation)
+# Render Blueprint (Lite-Node Deployment)
 services:
   - type: web
     name: stacy-ai-premium
@@ -6,7 +6,7 @@ services:
     rootDir: stacy
     branch: main
     plan: free
-    buildCommand: "npm install"
+    buildCommand: "npm install --production"
     startCommand: "node server.js"
     healthCheckPath: /
     envVars:
@@ -14,8 +14,9 @@ services:
         value: 10000
       - key: IS_RENDER
         value: "true"
-      # เจ้านายอย่าลืมใส่ค่าเหล่านี้ใน Dashboard ของ Render:
-      # TELEGRAM_TOKEN, NVIDIA_API_KEY, CALENDAR_ID, FIREBASE_SERVICE_ACCOUNT_JSON
+      - key: PUPPETEER_SKIP_CHROMIUM_DOWNLOAD
+        value: "true"
+      # เจ้านายใส่ค่าที่เหลือในพอร์ทัลเหมือนเดิมนะคะ
 
   - type: web
     name: vecna-music-bot
@@ -23,7 +24,7 @@ services:
     rootDir: vecna
     branch: main
     plan: free
-    buildCommand: "npm install"
+    buildCommand: "npm install --production"
     startCommand: "node server.js"
     envVars:
       - key: PORT
