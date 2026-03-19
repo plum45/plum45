@@ -1,0 +1,8 @@
+node_modules
+config/.env
+config/*.json
+output/
+scripts/test_*
+test_*.js
+*.log
+.DS_Store

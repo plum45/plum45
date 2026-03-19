@@ -1,0 +1,17 @@
+{
+  "name": "vecna-music-bot",
+  "version": "1.2.0",
+  "description": "Vecna - The Music Master AI",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon server.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "dotenv": "^16.3.1",
+    "puppeteer-core": "^21.5.0",
+    "telegraf": "^4.14.0",
+    "yt-search": "^2.13.1"
+  }
+}

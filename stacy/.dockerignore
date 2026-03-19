@@ -1,0 +1,9 @@
+node_modules
+npm-debug.log
+output
+temp
+*.docx
+*.xlsx
+.git
+Dockerfile
+docker-compose.yml

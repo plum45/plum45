@@ -1,24 +1,28 @@
-# Stacy AI: Docker Compose (Smart Edition) v2.1.5
-# 🔧 คำสั่งรัน: `docker compose up -d` 🚀
+# Stacy-Cloud: Dual Service Deployment
+version: '3.8'
 
 services:
-  stacy-ai:
-    build: .
-    container_name: stacy-master
-    restart: always # 🔒 รัน 24 ชม. ตลอดไป
+  stacy:
+    build:
+      context: ./stacy
+      dockerfile: Dockerfile
+    container_name: stacy-cloud
+    restart: always
     ports:
-      - "10000:10000" # เชื่อมฟรอนต์เอนด์ Dashboard
-    env_file:
-      - .env
-    environment:
-      - RENDER=true # ใช้ตรรกะ Cloud Mode (Silent Success + Forward to Local)
-      - NODE_ENV=production
+      - "10000:10000"
     volumes:
-      - ./Documents:/app/Documents # เก็บไฟล์งานถาวรใน Folder Documents
-      - /app/node_modules # ป้องกัน node_modules ทับซ้อน
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m" # จำกัดขนาด Log ไม่ให้เต็มเครื่อง
-        max-file: "3"
-    shm_size: '2gb' # เพิ่ม Shared Memory สำหรับ Chrome (Puppeteer) ให้ลื่นไหล
+      - ./stacy/config:/app/config
+    env_file:
+      - ./stacy/config/.env
+    environment:
+      - NODE_ENV=production
+      - RENDER=true
+      - IS_DOCKER=true
+
+  # Vecna (Music Bot): Optional on Cloud if it's just for chatting about music
+  # (Music playing will not work without a local PC audio output)
+  # vecna:
+  #   build: ./vecna
+  #   container_name: vecna-cloud
+  #   restart: always
+  #   env_file: ./vecna/.env

@@ -24,12 +24,13 @@ This skill allows Stacy to control music playback and YouTube session on the Mas
 
 ## Actions
 - \`YOUTUBE_OPEN\`: {"topic": "what to watch", "channel": "specific channel", "query": "..."}
-- \`MEDIA_CONTROL\`: {"action": "PLAY_PAUSE | NEXT | PREV | VOL_UP | VOL_DOWN"}
+- \`MEDIA_CONTROL\`: {"action": "PLAY_PAUSE | NEXT | PREV | VOL_UP | VOL_DOWN | CLOSE"}
 
 ## Workflow
 1. When the Master says "Play [topic] from [channel]", use \`YOUTUBE_OPEN\` with both fields.
 2. When the Master says "Find a video about [topic]", use \`YOUTUBE_OPEN\` with topic.
-3. When the Master says "Stop" or "Toggle", use \`MEDIA_CONTROL\` with \`PLAY_PAUSE\`.`;
+3. When the Master says "Stop" or "Toggle", use \`MEDIA_CONTROL\` with \`PLAY_PAUSE\`.
+4. When the Master says "ปิดเพลง" or "Close YouTube", use \`MEDIA_CONTROL\` with action \`CLOSE\` to close the tab directly.`;
 
 async function updateMusicSkill() {
     const skill = {

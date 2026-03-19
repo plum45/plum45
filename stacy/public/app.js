@@ -647,14 +647,23 @@ let taskCache = [];
 async function fetchTasks() {
     try {
         const id = (S.settings.tgId || '').trim() || 'me';
-        console.log(`📅 [Debug] Fetching tasks for ID: ${id}`);
-        // Removed orderBy to avoid index requirement for new users
-        const snap = await db.collection('userActivities').doc(id).collection('tasks').limit(500).get();
-        taskCache = snap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-        console.log(`✅ [Debug] Loaded ${taskCache.length} tasks:`, taskCache);
+        console.log(`📅 [Debug] Fetching unified calendar for ID: ${id}`);
+        const r = await fetch(`/api/calendar?userId=${id}`);
+        const data = await r.json();
+        
+        // Map to app's expected task format
+        taskCache = data.map(item => ({
+            id: item.id,
+            title: item.title,
+            time: item.start || item.time,
+            type: item.type,
+            description: item.description
+        }));
+        
+        console.log(`✅ [Debug] Loaded ${taskCache.length} events:`, taskCache);
         updateSyncStatus(true);
     } catch (e) { 
-        console.error('❌ [Critical] Tasks fetch error:', e); 
+        console.error('❌ [Critical] Calendar fetch error:', e); 
         updateSyncStatus(false);
     }
 }
