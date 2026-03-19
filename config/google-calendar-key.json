@@ -1,0 +1,13 @@
+{
+  "type": "service_account",
+  "project_id": "ai--agent-12d7a",
+  "private_key_id": "aec6f099009f09794dcf932d40074a4cd5bf2d9e",
+  "private_key": "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQDOOXeDmwMNBknK\n1b8r66MHA3Vbz6tKfx1RcSStvZ+SBSRaCgsAv3LyduloyNhcerelTIIl8G+76OFk\nfV3er6VdlFGJgBXkZ6o/9Ll8wLYRCYyk+asMLfTHu2CP3HdJbe1Bjqq4NPjkp5hL\nz3rp4OMiZWlnQR4I1qB+OqsVATbhsy+TZIgi+qYwY0qdjdYrPFV+4d5+dqi3W0Ix\ngSQWB3BkCpm5pz7RJjstlvRYIe2Pvkr0dlZJzhYIGuVABTxfhwTad+D4FxsIfcaY\n0PyK8UnTrORkMOWQPePJqc8FmteGzQI7y8rQQfVrt8Y18f7Peu7ETRnoeKYvbSHG\n4CMvljxdAgMBAAECgf8FlX0hJJcwjrsIDp6wAE57OWhipXzgx4S4Ersf4fEY5f8b\nzh4ssqVNDlPyKyD2d1wwLxaFnwLb31VSUczhnaW/i6d7ADE6eDcG1cJHRzZhBYnm\neVCLQ+HXEk0/aW0uif/RKYX136fdoGZK7Qem/BieuLeE1Di7+OU8tE5WVLfntgMC\nyOun3whJG0DUthhZHfLPjFvMkulhmiQs9mfTaOozmU7QL6hr4Q4mbqU/tdBTIqyh\n4v9pvZ6Gn29MeMv89BLLz/EmnH5/tgyJ+wyOgBteCzwzddpbDvXK/K7dwoSVh2jc\nnNTtC74NWs0n8sQReQMG9M7IPanNF4Zwo2DmbrECgYEA7wGHVBqR673f3Reub+Kf\nhozavImphzaBGVM2ynrwlGBrhbCdphhKlXnMaOS9MpfGCebTRjgyzir5U0tiHL3C\nL6hPTOFMoYr94JFxahHrY9Fa8BIGhmOBFxIayDyZvdZMEpX61GftVjYmAg14R21I\nAhjsQ0OODs6nhSW8BwXpGW0CgYEA3OM851QWPXhMRrVYesBcIwf4fF2yCtHCqfEe\nOSJTowWiFnFWNDmW19J4SFShXjBnFL/XVZNLMJbroJrrIsoMbEtdDlFBWAtSfERj\n3/5Uod6I7B2eueb8rUaFAHPSLbjYdcg/Uv03vgB2cKqVx48a+8hBKipBYPKgYYl7\nY8U5SLECgYBUEliVGAeOQisV7XeZucDdpnxm55Gvk1eUHfZfASHRP51y2G6L9218\n6OwjVZrLyiGKaByXTbtpVCqBxzmK3KEK/IxwgavgAzFMpjyb0BPZ99GiMuUCrsvA\n3sh2+QInidMWkpU51BjjQ4bZH/3YOjOjMTsiagf1Y3H/3wcl/UlCfQKBgQCpRrv1\ny8r/cKGDzpXv/Fqfvgv/ww4enIHCGrY+sr/Fvxtod5LIkxm2a+UiCTlhJVbZ3+r1\n+ds1cXNBsXdhQdYjZ934iuy4vHSKJx8jGZViN1hXGpv5e7tITzK+FgSMZYv9N2jQ\nAJ4nTdN2pEQEmvbi3aSS268ezNF77hBRdWNhAQKBgQDCG39ghJ7Mlh6thU8vopra\ni354YoqsvozLfNy0hrB38rXDRrce1z920WFZcwyYhVBqD95+x3swVG0/417FD3o8\nYKatdChsTEijLquHSALKMX9XWLu3UUbWEesWahvFQKQmphu+NCEmDXq5LHD0ogtr\nBtzKkSOvKsY/Wc3Ijf7L4w==\n-----END PRIVATE KEY-----\n",
+  "client_email": "stacy-helper@ai--agent-12d7a.iam.gserviceaccount.com",
+  "client_id": "117578056922757491760",
+  "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+  "token_uri": "https://oauth2.googleapis.com/token",
+  "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+  "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/stacy-helper%40ai--agent-12d7a.iam.gserviceaccount.com",
+  "universe_domain": "googleapis.com"
+}
