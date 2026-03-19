@@ -3,6 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const dns = require('dns');
 if (dns.setDefaultResultOrder) dns.setDefaultResultOrder('ipv4first');
 const { Telegraf, Markup } = require('telegraf');
+const { OpenAI } = require('openai');
 const axios = require('axios');
 const smartYT = require('./lib/actions/youtubeSmartController');
 
@@ -10,7 +11,12 @@ const smartYT = require('./lib/actions/youtubeSmartController');
 const MUSIC_BOT_TOKEN = process.env.MUSIC_BOT_TOKEN;
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const NVIDIA_URL = process.env.NVIDIA_URL || 'https://integrate.api.nvidia.com/v1/chat/completions';
-const MODEL = process.env.MODEL || 'meta/llama-3.3-70b-instruct';
+const MODEL = process.env.MODEL || 'stepfun-ai/step-3.5-flash';
+
+const client = new OpenAI({
+    apiKey: NVIDIA_API_KEY,
+    baseURL: 'https://integrate.api.nvidia.com/v1'
+});
 
 const bot = new Telegraf(MUSIC_BOT_TOKEN);
 const vecnaStore = new Map(); // Simple history storage
@@ -137,20 +143,32 @@ bot.on('text', async (ctx) => {
 ตัวอย่าง: "เปิดเพลงดังดึง" -> "จัดให้เลยครับเจ้านาย [PLAY: ดังดึง]"
         `;
 
-        const response = await axios.post(NVIDIA_URL, {
+        const stream = await client.chat.completions.create({
             model: MODEL,
             messages: [
                 { role: 'system', content: vecnaSystemPrompt + "\n" + aiContext },
                 ...userStore.history.slice(-10),
                 { role: 'user', content: text }
             ],
-            temperature: 0.5
-        }, {
-            headers: { 'Authorization': `Bearer ${NVIDIA_API_KEY}`, 'Content-Type': 'application/json' },
-            timeout: 60000
+            temperature: 0.5,
+            stream: true
         });
 
-        const reply = response.data.choices[0].message.content;
+        let fullReply = "";
+        let reasoning = "";
+
+        for await (const chunk of stream) {
+            const delta = chunk.choices[0]?.delta;
+            if (delta?.reasoning_content) {
+                reasoning += delta.reasoning_content;
+            }
+            if (delta?.content) {
+                fullReply += delta.content;
+            }
+        }
+
+        if (reasoning) console.log(`🧠 [Vecna Reasoning]: ${reasoning}`);
+        const reply = fullReply || "ขอโทษครับเจ้านาย ผมรับคำสั่งไม่ได้";
         
         // Check for Play Tag
         const playMatch = reply.match(/\[PLAY:\s*(.*?)\]/);
@@ -158,7 +176,7 @@ bot.on('text', async (ctx) => {
         if (playMatch) {
             const songName = playMatch[1].trim();
             const cleanReply = reply.replace(/\[PLAY:.*?\]/, '').trim();
-            await ctx.reply(cleanReply);
+            if (cleanReply) await ctx.reply(cleanReply);
             
             // Trigger Music
             try {

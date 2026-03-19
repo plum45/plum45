@@ -179,18 +179,32 @@ ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map
         const typingInterval = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
 
         try {
-            const completion = await client.chat.completions.create({
+            const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
                     { role: 'system', content: systemPrompt },
                     ...userStore.history.slice(-20),
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 0.1,
-                max_tokens: 4096
+                temperature: 0.7,
+                stream: true
             });
 
-            const reply = completion.choices[0].message.content || "";
+            let fullReply = "";
+            let reasoning = "";
+
+            for await (const chunk of stream) {
+                const delta = chunk.choices[0]?.delta;
+                if (delta?.reasoning_content) {
+                    reasoning += delta.reasoning_content;
+                }
+                if (delta?.content) {
+                    fullReply += delta.content;
+                }
+            }
+
+            if (reasoning) console.log(`🧠 [Stacy Reasoning]: ${reasoning}`);
+            const reply = fullReply || "ขอโทษทีค่ะ หนูคิดอะไรไม่ออกเลย";
             console.log(`[AI Response for ${userId}]: ${reply ? reply.substring(0, 200) : "No text content"}...`);
             let { cleanText, actions } = extractActions(reply);
             

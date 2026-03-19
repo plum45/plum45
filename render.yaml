@@ -1,0 +1,26 @@
+# Render Blueprint (Infrastructure as Code)
+services:
+  - type: web
+    name: stacy-ai-premium
+    env: docker
+    rootDir: stacy
+    branch: main
+    plan: free
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: IS_RENDER
+        value: "true"
+      # เจ้านายอย่าลืมไปใส่ค่าพวกนี้ใน Render Dashboard เพิ่มเติมด้วยนะคะเพื่อความปลอดภัย:
+      # TELEGRAM_TOKEN, NVIDIA_API_KEY, CALENDAR_ID, FIREBASE_SERVICE_ACCOUNT_JSON
+
+  - type: web
+    name: vecna-music-bot
+    env: docker
+    rootDir: vecna
+    branch: main
+    plan: free
+    envVars:
+      - key: PORT
+        value: 3000
