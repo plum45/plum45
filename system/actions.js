@@ -404,9 +404,32 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}+07:00`;
                 };
 
+                // Helper: Enhanced Thai Date Parser (Handles BE 2569 and DD/MM/YYYY)
+                const parseThaiDate = (str) => {
+                    if (!str) return new Date();
+                    let s = str.trim();
+                    // Handle DD/MM/YYYY or DD-MM-YYYY
+                    const parts = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
+                    if (parts) {
+                        let day = parseInt(parts[1]);
+                        let month = parseInt(parts[2]) - 1;
+                        let year = parseInt(parts[3]);
+                        if (year > 2400) year -= 543; // Convert BE to AD
+                        const d = new Date(year, month, day);
+                        // Add time if present
+                        const timeMatch = s.match(/(\d{1,2}):(\d{1,2})/);
+                        if (timeMatch) { d.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2])); }
+                        return d;
+                    }
+                    // Fallback to standard parser
+                    let d = new Date(s);
+                    if (d.getFullYear() > 2400) d.setFullYear(d.getFullYear() - 543);
+                    return d;
+                };
+
                 // Robust date parsing
-                let startDT = data.start ? new Date(data.start) : new Date();
-                let endDT = data.end ? new Date(data.end) : new Date(startDT.getTime() + 3600000); // 1 hour default
+                let startDT = parseThaiDate(data.start);
+                let endDT = data.end ? parseThaiDate(data.end) : new Date(startDT.getTime() + 600000); // 10 min default if only start given
 
                 // Validation
                 if (isNaN(startDT.getTime())) throw new Error(`วันเวลาเริ่มต้น (${data.start}) ไม่ถูกต้องค่ะ`);

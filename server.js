@@ -191,7 +191,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
-                    { role: 'system', content: "CRITICAL: You ARE Stacy. You have FULL WEB ACCESS. If the user asks for real-time info, gold, or news, you MUST use either [ACTION: WEB_SEARCH] or [ACTION: GOOGLE_SEARCH]. DO NOT apologize. DO NOT say you cannot. YOU HAVE THE TOOL." },
+                    { role: 'system', content: "CRITICAL: You ARE Stacy. You have FULL WEB ACCESS. Always prioritize the user's LATEST message for any actions or data extraction. DO NOT mix up tasks with previous conversation history unless explicitly linked. If the user says 'log this', use the task description from THAT message." },
                     { role: 'system', content: systemPrompt },
                     ...userStore.history.slice(-10),
                     { role: 'user', content: finalInput }
