@@ -11,40 +11,116 @@ const puppeteer = require('puppeteer');
 const screenshot = require('screenshot-desktop');
 const si = require('systeminformation');
 const wol = require('wake_on_lan');
+const PptxGenJS = require('pptxgenjs');
 
 // Destructure utils
 const { performSearch, handleImageSearch, logToTerminal, smartReply, sendSmartImage } = require('./utils');
+const { handleSubagent } = require('./subagent');
+const { scheduleTask } = require('./cron-manager');
+const { executeCommand } = require('./shell-executor');
+const { draftDocument } = require('./writing-engine');
+const { readFileChunk, writeFile, listDirectory, editFile } = require('./advanced-fs');
+const { fetchUrlContent } = require('./web-tools');
+const { executeMcpTool } = require('./mcp-client');
+const modularSkills = require('./skills_loader');
+
+function tryRepairJSON(str) {
+    // Attempt to fix truncated JSON by closing unclosed brackets
+    let s = str.trim();
+    let openBraces = 0, openBrackets = 0, inString = false, escape = false;
+    for (let i = 0; i < s.length; i++) {
+        const c = s[i];
+        if (escape) { escape = false; continue; }
+        if (c === '\\') { escape = true; continue; }
+        if (c === '"') { inString = !inString; continue; }
+        if (inString) continue;
+        if (c === '{') openBraces++;
+        if (c === '}') openBraces--;
+        if (c === '[') openBrackets++;
+        if (c === ']') openBrackets--;
+    }
+    // If we're inside a string, close it
+    if (inString) s += '"';
+    // Close any unclosed brackets/braces
+    while (openBrackets > 0) { s += ']'; openBrackets--; }
+    while (openBraces > 0) { s += '}'; openBraces--; }
+    return s;
+}
 
 function extractActions(text) {
     if (!text) return { cleanText: "", actions: [] };
     const actions = [];
-    // More robust regex to catch actions even if AI misses the curly braces for simple strings
-    const actionRegex = /\[ACTION:\s*([A-Z_]+)\s*(.*?)\s*\]/g;
-    let match;
     let cleanText = text;
 
-    while ((match = actionRegex.exec(text)) !== null) {
+    // Use bracket-aware parser instead of regex (regex breaks on nested [] in JSON)
+    const marker = '[ACTION:';
+    let searchFrom = 0;
+
+    while (true) {
+        const start = text.indexOf(marker, searchFrom);
+        if (start === -1) break;
+
+        // Extract action type (e.g., CREATE_EXCEL)
+        const afterMarker = start + marker.length;
+        let typeEnd = afterMarker;
+        while (typeEnd < text.length && /\s/.test(text[typeEnd])) typeEnd++; // skip spaces
+        let typeEndPos = typeEnd;
+        while (typeEndPos < text.length && /[A-Z_]/.test(text[typeEndPos])) typeEndPos++;
+        const type = text.substring(typeEnd, typeEndPos);
+
+        // Now find the matching closing ] by counting brackets
+        let depth = 1; // we already consumed the opening [
+        let pos = typeEndPos;
+        let inString = false, escape = false;
+
+        while (pos < text.length && depth > 0) {
+            const c = text[pos];
+            if (escape) { escape = false; pos++; continue; }
+            if (c === '\\') { escape = true; pos++; continue; }
+            if (c === '"') { inString = !inString; pos++; continue; }
+            if (!inString) {
+                if (c === '[') depth++;
+                if (c === ']') depth--;
+            }
+            pos++;
+        }
+
+        const fullMatch = text.substring(start, pos);
+        const dataStr = text.substring(typeEndPos, pos - 1).trim();
+
         try {
-            const type = match[1];
-            let dataStr = match[2].trim();
             let data;
-            
             if (dataStr.startsWith('{')) {
-                data = JSON.parse(dataStr);
+                try {
+                    data = JSON.parse(dataStr);
+                } catch (e1) {
+                    console.warn(`[Action Parse] Direct parse failed for ${type}, attempting repair...`);
+                    try {
+                        data = JSON.parse(tryRepairJSON(dataStr));
+                        console.log(`[Action Parse] Repair succeeded for ${type}`);
+                    } catch (e2) {
+                        console.error(`[Action Parse] Repair also failed for ${type}:`, dataStr.substring(0, 300));
+                        data = {};
+                    }
+                }
+            } else if (dataStr === '' || dataStr === '{}') {
+                data = {};
             } else {
-                // Heuristic: If it's a raw string, treat as "query" for search or "url" for browse
                 const queryActions = ['WEB_SEARCH', 'IMAGE_SEARCH', 'YOUTUBE_OPEN', 'YOUTUBE_LIST_TABS'];
                 if (queryActions.includes(type)) data = { query: dataStr };
                 else if (type === 'WEB_BROWSE') data = { url: dataStr };
                 else data = { value: dataStr };
             }
-            
+
             actions.push({ type, data });
-            cleanText = cleanText.replace(match[0], '');
+            cleanText = cleanText.replace(fullMatch, '');
         } catch (e) {
-            console.error('Action Parse Error:', e, 'Data:', match[2]);
+            console.error('Action Parse Error:', e.message);
         }
+
+        searchFrom = pos;
     }
+
     return { cleanText: cleanText.trim(), actions };
 }
 
@@ -57,9 +133,30 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
         case 'CREATE_EXCEL':
             try {
                 const workbook = xlsx.utils.book_new();
-                const fileName = data.filename || `export_${Date.now()}.xlsx`;
-                const filePath = path.join(outputDir, fileName);
-                const sheets = data.sheets || [{ name: 'Data', data: data.data || [] }];
+                const baseFileName = (data.filename || data.title || `export_${Date.now()}`).replace(/[\\/:*?"<>|]/g, '_') + (data.filename ? '' : '.xlsx');
+                let filePath = path.join(outputDir, baseFileName);
+                
+                // Allow AI to specify direct path (e.g. OneDrive)
+                if (data.path || data.customPath) {
+                    const reqPath = data.path || data.customPath;
+                    if (reqPath.toLowerCase().endsWith('.xlsx')) filePath = reqPath;
+                }
+
+                // Construct data if AI used headers/rows format instead of sheets
+                let dataArray = data.data;
+                if (!dataArray && data.headers) {
+                    const rows = data.rows || [];
+                    dataArray = [data.headers, ...rows];
+                }
+
+                // Validate: reject empty files (only headers, no rows)
+                if (!dataArray || dataArray.length <= 1) {
+                    console.warn('[CREATE_EXCEL] No rows data! Headers:', JSON.stringify(data.headers));
+                    await ctx.reply('⚠️ หนูสร้าง Excel ไม่ได้ค่ะเจ้านาย เพราะข้อมูล rows ขาดหายไปค่ะ กรุณาลองสั่งอีกครั้งนะคะ');
+                    break;
+                }
+
+                const sheets = data.sheets || [{ name: 'Data', data: dataArray || [] }];
 
                 sheets.forEach(s => {
                     const ws = (Array.isArray(s.data) && s.data.length > 0 && typeof s.data[0] === 'object' && !Array.isArray(s.data[0]))
@@ -70,28 +167,116 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                 });
                 
                 xlsx.writeFile(workbook, filePath);
+                
+                // Backup to Permanent DocDir if we used temp path
+                if (filePath.includes(outputDir) && docDir && fs.existsSync(docDir)) {
+                    const permanentPath = path.join(docDir, baseFileName);
+                    fs.copyFileSync(filePath, permanentPath);
+                }
+
                 await ctx.replyWithDocument({ source: filePath });
                 await logToTerminal(userId, 'CREATE_EXCEL', `Generated: ${filePath}`);
-            } catch (err) { ctx.reply(`❌ ระบบสร้างไฟล์ Excel ขัดข้อง: ${err.message}`); }
+            } catch (err) { 
+                console.error('CREATE_EXCEL Error:', err);
+                ctx.reply(`❌ ระบบสร้างไฟล์ Excel ขัดข้อง: ${err.message}`); 
+            }
             break;
 
         case 'CREATE_WORD':
             try {
-                const fileName = data.filename || `document_${Date.now()}.docx`;
+                // 🛠️ DEFENSIVE CLEANING: Remove characters that break Word/XML
+                const cleanStr = (s) => (s || "").replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F]/g, "").trim();
+
+                const fileName = (data.filename || data.title || `document_${Date.now()}`).replace(/[\\/:*?"<>|]/g, '_') + (data.filename ? '' : '.docx');
                 const filePath = path.join(outputDir, fileName);
-                const children = [new Paragraph({ text: data.title || 'Untitled', heading: HeadingLevel.TITLE, alignment: docx.AlignmentType.CENTER })];
+
+                const children = [
+                    new Paragraph({ 
+                        children: [new TextRun({ text: cleanStr(data.title) || 'Untitled', bold: true, size: 32 })], 
+                        alignment: docx.AlignmentType.CENTER,
+                        spacing: { after: 400 }
+                    })
+                ];
+                console.log(`[CREATE_WORD] Generating Word for ${userId}. Data:`, JSON.stringify(data).substring(0, 500));
+                
+                // 🛠️ FALLBACK: If AI sent "content" instead of "sections", convert it
+                if (!data.sections && data.content) {
+                    data.sections = [{ text: data.content }];
+                }
 
                 (data.sections || []).forEach(s => {
-                    if (s.heading) children.push(new Paragraph({ text: s.heading, heading: HeadingLevel.HEADING_1 }));
-                    if (s.text) s.text.split('\n').forEach(line => children.push(new Paragraph({ children: [new TextRun(line)], spacing: { after: 200 } })));
+                    if (s.heading) children.push(new Paragraph({ 
+                        children: [new TextRun({ text: cleanStr(s.heading), bold: true, size: 28 })], 
+                        spacing: { before: 200, after: 100 }
+                    }));
+                    if (s.text || s.content) {
+                        const bodyText = s.text || s.content || "";
+                        bodyText.split('\n').forEach(line => {
+                            if (line.trim()) {
+                                children.push(new Paragraph({ 
+                                    children: [new TextRun({ text: cleanStr(line) })], 
+                                    spacing: { after: 120 }
+                                }));
+                            }
+                        });
+                    }
                 });
 
-                const doc = new Document({ sections: [{ children }] });
+                const doc = new Document({
+                    sections: [{
+                        children: children,
+                    }],
+                });
+
                 const buffer = await docx.Packer.toBuffer(doc);
                 fs.writeFileSync(filePath, buffer);
+                
+                // Backup to Permanent DocDir (e.g. OneDrive) if available
+                if (docDir && fs.existsSync(docDir)) {
+                    const permanentPath = path.join(docDir, fileName);
+                    fs.copyFileSync(filePath, permanentPath);
+                    console.log(`[Backup] Word saved to: ${permanentPath}`);
+                }
+
                 await ctx.replyWithDocument({ source: filePath });
                 await logToTerminal(userId, 'CREATE_WORD', `Generated: ${filePath}`);
-            } catch (err) { ctx.reply(`❌ ระบบสร้างไฟล์ Word ขัดข้อง: ${err.message}`); }
+            } catch (err) { 
+                console.error('CREATE_WORD Error:', err);
+                ctx.reply(`❌ ระบบสร้างไฟล์ Word ขัดข้อง: ${err.message}`); 
+            }
+            break;
+
+        case 'CREATE_SLIDE':
+            try {
+                const pptx = new PptxGenJS();
+                const fileName = (data.filename || data.title || `slides_${Date.now()}`).replace(/[\\/:*?"<>|]/g, '_') + (data.filename ? '' : '.pptx');
+                const filePath = path.join(outputDir, fileName);
+
+                // Title Slide
+                let titleSlide = pptx.addSlide();
+                titleSlide.addText(data.title || 'Untitled Presentation', { x: 1, y: 1.5, w: '80%', fontSize: 44, color: '363636', align: 'center', bold: true });
+
+                // Content Slides
+                (data.slides || []).forEach(s => {
+                    let slide = pptx.addSlide();
+                    if (s.title) slide.addText(s.title, { x: 0.5, y: 0.3, w: '90%', fontSize: 32, color: '0088CC', bold: true });
+                    if (s.content) slide.addText(s.content, { x: 0.5, y: 1.2, w: '90%', h: '70%', fontSize: 20, color: '333333', align: 'left', valign: 'top', bullet: true });
+                });
+
+                await pptx.writeFile({ fileName: filePath });
+                
+                // Backup to Permanent DocDir (e.g. OneDrive) if available
+                if (docDir && fs.existsSync(docDir)) {
+                    const permanentPath = path.join(docDir, fileName);
+                    fs.copyFileSync(filePath, permanentPath);
+                }
+
+                await ctx.replyWithDocument({ source: filePath });
+                await logToTerminal(userId, 'CREATE_SLIDE', `Generated: ${filePath}`);
+            } catch (err) {
+                console.error('CREATE_SLIDE Error:', err);
+                ctx.reply(`❌ ระบบสร้างสไลด์ขัดข้อง: ${err.message}`);
+            }
             break;
 
         case 'SCREEN_CAPTURE':
@@ -108,7 +293,7 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                 const [cpu, mem, load, battery] = await Promise.all([si.cpu(), si.mem(), si.currentLoad(), si.battery()]);
                 let stats = `💻 **Laptop Status**\n- CPU: ${cpu.brand}\n- Load: ${load.currentLoad.toFixed(2)}%\n- RAM: ${(mem.used / 1e9).toFixed(2)} / ${(mem.total / 1e9).toFixed(2)} GB`;
                 if (battery && battery.hasBattery) stats += `\n- 🔋 Battery: ${battery.percent}% (${battery.isCharging ? '⚡' : '🔋'})`;
-                await ctx.reply(stats);
+                await smartReply(ctx, stats, 60000); // Auto-delete after 60s
             } catch (err) { ctx.reply(`❌ ดึงข้อมูลระบบล้มเหลว`); }
             break;
 
@@ -126,10 +311,17 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
             break;
 
         case 'WEB_SEARCH':
+        case 'GOOGLE_SEARCH':
             try {
-                const results = await performSearch(data.query);
-                await smartReply(ctx, `🔍 **สรุปการวิจัย:**\n\n${results}`);
-            } catch (err) { ctx.reply(`❌ ค้นหาล้มเหลว`); }
+                const query = data.query || data.q || data.text || (typeof data === 'string' ? data : null);
+                if (!query) throw new Error('คำค้นหาว่างเปล่า');
+                
+                // If the user explicitly asked for GOOGLE_SEARCH or if WEB_SEARCH fails
+                const { googleSearch } = require('./utils');
+                const results = (type === 'GOOGLE_SEARCH') ? await googleSearch(query) : await performSearch(query);
+                
+                await smartReply(ctx, `🔍 **ผลการค้นหา (${type === 'GOOGLE_SEARCH' ? 'Google' : 'Tavily'}):**\n\n${results}`);
+            } catch (err) { await ctx.reply(`❌ ค้นหาล้มเหลว: ${err.message}`); }
             break;
 
         case 'IMAGE_SEARCH':
@@ -315,6 +507,104 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
 
         case 'BROWSER_INTERACT':
             await (require('../skills/browserInteract'))({ ctx, data, userId, sendSmartImage, logToTerminal });
+            break;
+
+        case 'CANVA_CONTROL':
+        case 'CANVA_OPEN':
+        case 'CANVA_SEARCH':
+        case 'CANVA_CREATE':
+            await (require('../skills/canva'))({ ctx, data, userId, logToTerminal });
+            break;
+
+        case 'SUBAGENT_SPAWN': {
+            const result = await handleSubagent({ goal: data.goal, context: data.context || '', client: options.client, userId });
+            await smartReply(ctx, `📌 **ผลลัพธ์จาก Subagent:**\n${result}`);
+            break;
+        }
+
+        case 'SCHEDULE_TASK': {
+            const { name, schedule, task } = data;
+            const parsedSchedule = scheduleTask({ name, schedule, task, ctx, smartReply });
+            if (parsedSchedule) {
+                await smartReply(ctx, `⏰ **ตั้งเวลาเรียบร้อยแล้วค่ะ!**\n\nชื่องาน: ${name}\nเวลา: ${parsedSchedule} (รูปแบบ Cron)\nภารกิจ: ${task}`);
+            } else {
+                await smartReply(ctx, `❌ **ตั้งเวลาไม่สำเร็จค่ะ** ระบบไม่สามารถอ่านรูปแบบเวลา "${schedule}" ได้ค่ะเจ้านาย`);
+            }
+            break;
+        }
+
+        case 'RUN_COMMAND':
+        case 'EXEC_COMMAND': {
+            const output = await executeCommand(data.command);
+            await smartReply(ctx, `🖥️ **System Output:**\n\`\`\`\n${output}\n\`\`\``, 60000); // Auto-delete after 60s
+            break;
+        }
+
+        case 'DOCUMENT_DRAFT': {
+            const draft = await draftDocument({ goal: data.goal, instructions: data.instructions || '', client: options.client });
+            await smartReply(ctx, `🖋️ **Draft งานเขียน:**\n\n${draft}`);
+            break;
+        }
+
+        case 'READ_FILE': {
+            const result = readFileChunk(data.path, data.offset || 1, data.limit || 2000);
+            await smartReply(ctx, `📄 **เนื้อหาไฟล์:**\n\`\`\`\n${result}\n\`\`\``);
+            break;
+        }
+
+        case 'WRITE_FILE':
+        case 'CREATE_FILE': {
+            const result = writeFile(data.path, data.content);
+            await smartReply(ctx, `💾 **สถานะแก้ไขไฟล์:**\n${result}`);
+            break;
+        }
+
+        case 'EDIT_FILE': {
+            const result = editFile(data.path, data.old_text, data.new_text, data.replace_all || false);
+            await smartReply(ctx, `💾 **สถานะแก้ไขไฟล์:**\n${result}`);
+            break;
+        }
+
+        case 'LIST_DIR': {
+            const result = listDirectory(data.path, data.recursive || false, data.max_entries || 200);
+            await smartReply(ctx, `📂 **เนื้อหาในโฟลเดอร์:**\n\`\`\`\n${result}\n\`\`\``);
+            break;
+        }
+
+        case 'WEB_FETCH': {
+            const result = await fetchUrlContent(data.url, data.max_chars || 50000);
+            await smartReply(ctx, `🌐 **เนื้อหาเว็บ:**\n\`\`\`markdown\n${result}\n\`\`\``);
+            break;
+        }
+
+        case 'MCP_CALL': {
+            const result = await executeMcpTool(data.server, data.command, data.args || [], data.tool, data.tool_args || {});
+            await smartReply(ctx, `🔌 **MCP Output:**\n\`\`\`\n${result}\n\`\`\``);
+            break;
+        }
+        case 'ADD_CALENDAR_EVENT':
+            try {
+                const { addGoogleCalendarEvent } = require('./calendar');
+                const event = await addGoogleCalendarEvent(data.title, data.start, data.end, data.description || '');
+                await ctx.reply(`📅 **สร้างนัดหมายสำเร็จค่ะ!**\n📌 ${event.summary}\n🔗 ${event.htmlLink}`);
+                await logToTerminal(userId, 'ADD_CALENDAR_EVENT', `Created: ${event.summary}`);
+            } catch (err) {
+                console.error('ADD_CALENDAR_EVENT Error:', err);
+                ctx.reply(`❌ บันทึกนัดหมายไม่สำเร็จ: ${err.message}`);
+            }
+            break;
+
+        default:
+            if (modularSkills.handlers[type]) {
+                try {
+                    await modularSkills.handlers[type](type, data, ctx, userId, options);
+                } catch(err) {
+                    console.error(`[Modular Skill Error] ${type}:`, err);
+                    ctx.reply(`❌ ฟังก์ชันเพิ่มเติมทำงานผิดพลาด: ${err.message}`);
+                }
+            } else {
+                console.log(`[Unhandled Action] Unknown or unused action type: ${type}`);
+            }
             break;
     }
 }

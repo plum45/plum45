@@ -49,19 +49,72 @@ function initFirebase() {
     return { db, firebaseStatus };
 }
 
+const LOCAL_DB_PATH = path.join(__dirname, '../config/local_db.json');
+
+function getLocalData() {
+    try {
+        if (fs.existsSync(LOCAL_DB_PATH)) {
+            return JSON.parse(fs.readFileSync(LOCAL_DB_PATH, 'utf8'));
+        }
+    } catch (e) { console.error("⚠️ [LocalDB] Read error:", e.message); }
+    return { userActivities: {} };
+}
+
+function saveLocalData(data) {
+    try {
+        fs.writeFileSync(LOCAL_DB_PATH, JSON.stringify(data, null, 2));
+    } catch (e) { console.error("⚠️ [LocalDB] Write error:", e.message); }
+}
+
 async function getBotMemory(userId) {
-    if (!db) return { identity: "AI หญิงสาวอัจฉริยะ", facts: [] };
-    const userRef = db.collection('userActivities').doc(String(userId));
-    const doc = await userRef.get();
-    if (!doc.exists) return { identity: "AI หญิงสาวอัจฉริยะ", facts: [] };
-    const data = doc.data();
-    return {
-        identity: data.identity || "AI หญิงสาวอัจฉริยะ",
-        facts: data.facts || []
-    };
+    const defaultMemory = { identity: "AI หญิงสาวอัจฉริยะ (Recovery Mode)", facts: [] };
+    if (!db) {
+        // Local Fallback
+        const data = getLocalData();
+        return data.userActivities[userId]?.memory || defaultMemory;
+    }
+    try {
+        const userRef = db.collection('userActivities').doc(String(userId));
+        const doc = await userRef.get();
+        if (!doc.exists) return defaultMemory;
+        const data = doc.data();
+        return {
+            identity: data.identity || "AI หญิงสาวอัจฉริยะ",
+            facts: data.facts || []
+        };
+    } catch (e) {
+        console.error("⚠️ [getBotMemory] Failed (using default):", e.message);
+        return defaultMemory;
+    }
 }
 
 async function saveBotMemory(userId, userMsg, botReply) {
+    // 1. Local Save (Always save locally as backup or primary)
+    const data = getLocalData();
+    if (!data.userActivities[userId]) data.userActivities[userId] = { memory: { identity: "Stacy AI", facts: [] }, history: [] };
+    const user = data.userActivities[userId];
+    
+    user.history.push({ user: userMsg, bot: botReply, timestamp: new Date().toISOString() });
+    if (user.history.length > 50) user.history.shift();
+    
+    // Heuristic Fact Extraction
+    const factPatterns = [
+        { re: /(?:ฉันชื่อ|ผมชื่อ|เรียกผมว่า)\s*([^\n.,!]+)/i, fact: "ชื่อเจ้านายคือ $1" },
+        { re: /(?:จำไว้ว่า|อย่าลืมว่า|เตือนฉันว่า)\s*([^\n.,!]+)/i, fact: "$1" },
+        { re: /(?:ฉันชอบ|ผมชอบ)\s*([^\n.,!]+)/i, fact: "เจ้านายชอบ $1" }
+    ];
+
+    for (const p of factPatterns) {
+        const match = userMsg.match(p.re);
+        if (match && match[1]) {
+            const fact = p.fact.replace('$1', match[1].trim());
+            if (!user.memory.facts.includes(fact)) user.memory.facts.push(fact);
+            console.log(`[Local Memory Extracted]: ${fact}`);
+        }
+    }
+    saveLocalData(data);
+
+    // 2. Firebase Save (Optional)
     if (!db) return;
     try {
         const userRef = db.collection('userActivities').doc(String(userId));
@@ -70,31 +123,27 @@ async function saveBotMemory(userId, userMsg, botReply) {
             bot: botReply,
             timestamp: admin.firestore.FieldValue.serverTimestamp()
         });
-
-        // Heuristic Fact Extraction
-        const factPatterns = [
-            { re: /(?:ฉันชื่อ|ผมชื่อ|เรียกผมว่า)\s*([^\n.,!]+)/i, fact: "ชื่อเจ้านายคือ $1" },
-            { re: /(?:จำไว้ว่า|อย่าลืมว่า|เตือนฉันว่า)\s*([^\n.,!]+)/i, fact: "$1" },
-            { re: /(?:ฉันชอบ|ผมชอบ)\s*([^\n.,!]+)/i, fact: "เจ้านายชอบ $1" }
-        ];
-
+        
         for (const p of factPatterns) {
             const match = userMsg.match(p.re);
             if (match && match[1]) {
                 const fact = p.fact.replace('$1', match[1].trim());
-                await userRef.update({
-                    facts: admin.firestore.FieldValue.arrayUnion(fact)
-                });
-                console.log(`[Memory Extracted]: ${fact}`);
+                await userRef.update({ facts: admin.firestore.FieldValue.arrayUnion(fact) });
             }
         }
-    } catch (e) {
-        console.error('Save Memory Error:', e);
-    }
+    } catch (e) { console.error('Firebase Save Error:', e); }
 }
 
 async function getChatHistory(userId, limit = 20) {
-    if (!db) return [];
+    if (!db) {
+        // Local Fallback
+        const data = getLocalData();
+        const history = data.userActivities[userId]?.history || [];
+        return history.slice(-limit).map(h => [
+            { role: 'user', content: h.user },
+            { role: 'assistant', content: h.bot }
+        ]).flat();
+    }
     try {
         const historySnap = await db.collection('userActivities').doc(String(userId))
             .collection('history')
@@ -102,7 +151,6 @@ async function getChatHistory(userId, limit = 20) {
             .limit(limit)
             .get();
         if (historySnap.empty) return [];
-        // Map to OpenAI format and reverse to get chronological order
         return historySnap.docs.map(doc => {
             const data = doc.data();
             return [
@@ -111,7 +159,7 @@ async function getChatHistory(userId, limit = 20) {
             ];
         }).flat().reverse();
     } catch (e) {
-        console.error('Fetch History Error:', e);
+        console.error('⚠️ [getChatHistory] Failed (returning empty):', e.message);
         return [];
     }
 }

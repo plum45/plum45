@@ -1,0 +1,1 @@
+- **Dummy Skill**: `[ACTION: DUMMY_ACTION {"test": "value"}]`

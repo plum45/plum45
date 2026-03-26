@@ -37,4 +37,35 @@ async function getGoogleCalendarEvents() {
     }
 }
 
-module.exports = { getGoogleCalendarEvents };
+async function addGoogleCalendarEvent(title, start, end, description = '') {
+    try {
+        const keyPath = path.join(__dirname, '../config/google-calendar-key.json');
+        if (!fs.existsSync(keyPath)) throw new Error('Google Calendar key missing');
+        
+        const auth = new google.auth.GoogleAuth({
+            keyFile: keyPath,
+            scopes: ['https://www.googleapis.com/auth/calendar']
+        });
+        const calendar = google.calendar({ version: 'v3', auth });
+        const calendarId = process.env.CALENDAR_ID || 'primary';
+        
+        const event = {
+            summary: title,
+            description: description,
+            start: { dateTime: new Date(start).toISOString() },
+            end: { dateTime: new Date(end).toISOString() },
+        };
+        
+        const res = await calendar.events.insert({
+            calendarId: calendarId,
+            resource: event,
+        });
+        
+        return res.data;
+    } catch (e) {
+        console.error('Add Calendar Event Error:', e.message);
+        throw e;
+    }
+}
+
+module.exports = { getGoogleCalendarEvents, addGoogleCalendarEvent };
