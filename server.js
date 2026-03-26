@@ -93,7 +93,7 @@ const setupKeyFile = (envVar, filename) => {
     if (!fs.existsSync(filePath) && process.env[envVar]) {
         try {
             console.log(`📡 Recreating config/${filename} from environment variable...`);
-            fs.writeFileSync(filePath, process.env[envVar]);
+            fs.writeFileSync(filePath, process.env[envVar].trim());
         } catch (e) {
             console.error(`❌ Failed to recreate ${filename}:`, e.message);
         }
