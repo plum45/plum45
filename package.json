@@ -28,6 +28,7 @@
     "node-cron": "^4.2.1",
     "openai": "^6.31.0",
     "pdf-parse": "^2.4.5",
+    "pptxgenjs": "^4.0.1",
     "puppeteer": "^24.39.1",
     "screenshot-desktop": "^1.15.3",
     "systeminformation": "^5.31.4",
