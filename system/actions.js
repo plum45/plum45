@@ -506,7 +506,7 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     createdAt: admin.firestore.FieldValue.serverTimestamp()
                 });
 
-                ctx.reply(`📝 **บันทึกเวลาทำงานลงฐานข้อมูลให้แล้วค่ะเจ้านาย!**\n✅ **งาน:** ${task}\n🕒 **ระยะเวลา:** ${duration}\n🕒 **บันทึกเมื่อ:** ${new Date().toLocaleString('th-TH')}\n\n💡 *หมายเหตุ: หากเจ้านายต้องการให้บันทึกลง Google Calendar ด้วย ให้แจ้งหนูว่า "ลงปฏิทินด้วยนะ" นะคะ*`);
+                ctx.reply(`📝 **บันทึกเวลาทำงานลงฐานข้อมูลให้แล้วค่ะเจ้านาย!**\n✅ **งาน:** ${task}\n🕒 **ระยะเวลา:** ${duration}\n🕒 **บันทึกเมื่อ:** ${now.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' })}\n\n🔗 **เช็คหน้า Dashboard:** https://plum45.onrender.com\n\n💡 *หมายเหตุ: หากเจ้านายต้องการให้บันทึกลง Google Calendar ด้วย ให้แจ้งหนูว่า "ลงปฏิทินด้วยนะ" นะคะ*`);
             } catch (err) { ctx.reply(`❌ บันทึก Log ไม่สำเร็จ: ${err.message}`); }
             break;
 
