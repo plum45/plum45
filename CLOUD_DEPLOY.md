@@ -2,18 +2,16 @@
 
 To keep Stacy AI running even when your computer is **turned off**, you need to host it on a **Cloud Server (VPS)** or a **Platform-as-a-Service (PaaS)**.
 
-## Option 1: Render.com (Easiest & Free-ish)
-The project already includes a `Dockerfile` and `vercel.json`, making it ready for Render or Vercel.
+## Option 1: Render.com (Recommended & Easiest)
+The project includes a `render.yaml` and `Dockerfile`, making deployment fully automated.
 
 1. Create a free account at [Render.com](https://render.com).
-2. Create a new **Web Service**.
+2. Create a new **Blueprint** (instead of a Web Service).
 3. Connect your GitHub repository.
-4. Set the following **Environment Variables**:
+4. Render will detect the `render.yaml` and prompt you for:
    - `TELEGRAM_TOKEN`: Your Bot Token
    - `NVIDIA_API_KEY`: Your API Key
-   - `MODEL`: `meta/llama-3.1-70b-instruct` (Fast & Smart)
-   - `FIREBASE_CONFIG`: (Your JSON config)
-5. Render will automatically build the `Dockerfile` and start the bot.
+5. Click **Apply** and Render will handle the build and deployment.
 
 ## Option 2: VPS (DigitalOcean, Hetzner, Google Cloud)
 For total control, use a Linux VPS.

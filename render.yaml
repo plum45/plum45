@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: stacy-ai
+    env: docker
+    plan: free
+    region: singapore # Change as needed
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: TELEGRAM_TOKEN
+        sync: false # Set in Render UI
+      - key: NVIDIA_API_KEY
+        sync: false # Set in Render UI
+      - key: MODEL
+        value: "meta/llama-3.1-70b-instruct"
+      - key: IS_RENDER
+        value: "true"
+      - key: LOCAL_MODE
+        value: "false"
