@@ -188,12 +188,18 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
         const typingInterval = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
 
         try {
+            // Sanitize history to prevent hallucinated actions from polluting context
+            const cleanHistory = userStore.history.slice(-6).map(msg => ({
+                ...msg,
+                content: msg.content ? msg.content.replace(/\[ACTION:[\s\S]*?\]/g, '').trim() : ''
+            })).filter(msg => msg.content.length > 0);
+
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
-                    { role: 'system', content: "CRITICAL: You ARE Stacy. Always prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). DO NOT use old topics (like gold prices or Julie) unless explicitly mentioned in the CURRENT message. Be strict and precise." },
+                    { role: 'system', content: "CRITICAL: You ARE Stacy. Always prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks (like gold prices or Julie) unless they are in the user's LATEST message." },
                     { role: 'system', content: systemPrompt },
-                    ...userStore.history.slice(-6),
+                    ...cleanHistory,
                     { role: 'user', content: finalInput }
                 ],
                 temperature: 1.0,
