@@ -404,32 +404,43 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}+07:00`;
                 };
 
-                // Helper: Enhanced Thai Date Parser (Handles BE 2569 and DD/MM/YYYY)
+                // Helper: Ultra-Robust Thai Date Parser (Handles BE 2569, DD/MM/YYYY, and standard formats)
                 const parseThaiDate = (str) => {
                     if (!str) return new Date();
-                    let s = str.trim();
-                    // Handle DD/MM/YYYY or DD-MM-YYYY
-                    const parts = s.match(/(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})/);
-                    if (parts) {
-                        let day = parseInt(parts[1]);
-                        let month = parseInt(parts[2]) - 1;
-                        let year = parseInt(parts[3]);
-                        if (year > 2400) year -= 543; // Convert BE to AD
-                        const d = new Date(year, month, day);
-                        // Add time if present
-                        const timeMatch = s.match(/(\d{1,2}):(\d{1,2})/);
-                        if (timeMatch) { d.setHours(parseInt(timeMatch[1]), parseInt(timeMatch[2])); }
-                        return d;
+                    let s = str.trim().replace(/\s+/g, ' ');
+                    
+                    // Priority 1: DD/MM/YYYY or DD-MM-YYYY with optional time
+                    const dmyRegex = /(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})(\s+(\d{1,2}):(\d{1,2}))?/;
+                    const match = s.match(dmyRegex);
+                    if (match) {
+                        let d = parseInt(match[1]);
+                        let m = parseInt(match[2]) - 1;
+                        let y = parseInt(match[3]);
+                        if (y > 2400) y -= 543;
+                        const date = new Date(y, m, d);
+                        if (match[5]) date.setHours(parseInt(match[5]), parseInt(match[6] || 0));
+                        return date;
                     }
-                    // Fallback to standard parser
+
+                    // Priority 2: Standard parse with BE check
                     let d = new Date(s);
+                    if (isNaN(d.getTime())) {
+                        // Try just numbers if format like 27032569
+                        if (/^\d{8}$/.test(s)) {
+                           let d2 = parseInt(s.substring(0,2));
+                           let m2 = parseInt(s.substring(2,4)) - 1;
+                           let y2 = parseInt(s.substring(4,8));
+                           if (y2 > 2400) y2 -= 543;
+                           return new Date(y2, m2, d2);
+                        }
+                    }
                     if (d.getFullYear() > 2400) d.setFullYear(d.getFullYear() - 543);
                     return d;
                 };
 
                 // Robust date parsing
                 let startDT = parseThaiDate(data.start);
-                let endDT = data.end ? parseThaiDate(data.end) : new Date(startDT.getTime() + 600000); // 10 min default if only start given
+                let endDT = data.end ? parseThaiDate(data.end) : new Date(startDT.getTime() + 600000); 
 
                 // Validation
                 if (isNaN(startDT.getTime())) throw new Error(`วันเวลาเริ่มต้น (${data.start}) ไม่ถูกต้องค่ะ`);
