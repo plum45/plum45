@@ -469,7 +469,13 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                 }
 
                 ctx.reply(`📅 **บันทึกนัดหมายเรียบร้อยแล้วค่ะ!**\n📌 **หัวข้อ:** ${data.title}\n🕒 **เวลา:** ${startDT.toLocaleString('th-TH')}\n🔗 [ดูในปฏิทิน](${res.data.htmlLink})`, { parse_mode: 'Markdown' });
-            } catch (err) { ctx.reply(`❌ บันทึกปฏิทินไม่สำเร็จ: ${err.message}`); }
+            } catch (err) { 
+                console.error(`[CALENDAR_ERROR]`, err);
+                let msg = err.message;
+                if (err.message.includes('invalid_grant')) msg = "กุญแจ (Key) ของ Google Calendar ไม่ถูกต้องหรือหมดอายุค่ะ";
+                if (err.message.includes('not found')) msg = "ไม่พบปฏิทิน (Calendar ID) ที่ระบุค่ะ";
+                ctx.reply(`❌ บันทึกปฏิทินไม่สำเร็จ: ${msg}\n\n💡 เจ้านายลองเช็ค Environment Variable ใน Render นะคะว่าได้วางข้อมูลจากไฟล์ .json เข้าไปครบถ้วนหรือยังค่ะ?`); 
+            }
             break;
 
         case 'WORK_LOG':
