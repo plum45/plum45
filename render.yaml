@@ -12,6 +12,10 @@ services:
         sync: false # Set in Render UI
       - key: NVIDIA_API_KEY
         sync: false # Set in Render UI
+      - key: GOOGLE_CALENDAR_KEY
+        sync: false # Set in Render UI (Copy content of config/google-calendar-key.json)
+      - key: FIREBASE_SERVICE_ACCOUNT
+        sync: false # Set in Render UI (Copy content of config/serviceAccountKey.json)
       - key: MODEL
         value: "meta/llama-3.1-70b-instruct"
       - key: IS_RENDER

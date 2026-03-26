@@ -86,7 +86,23 @@ const outputDir = path.join(__dirname, 'output');
     if (!fs.existsSync(d)) fs.mkdirSync(d, { recursive: true });
 });
 
-// Initialize System Parts
+// Initialize System Parts (Cloud Credentials Setup)
+const configDir = path.join(__dirname, 'config');
+const setupKeyFile = (envVar, filename) => {
+    const filePath = path.join(configDir, filename);
+    if (!fs.existsSync(filePath) && process.env[envVar]) {
+        try {
+            console.log(`📡 Recreating config/${filename} from environment variable...`);
+            fs.writeFileSync(filePath, process.env[envVar]);
+        } catch (e) {
+            console.error(`❌ Failed to recreate ${filename}:`, e.message);
+        }
+    }
+};
+
+setupKeyFile('GOOGLE_CALENDAR_KEY', 'google-calendar-key.json');
+setupKeyFile('FIREBASE_SERVICE_ACCOUNT', 'serviceAccountKey.json');
+
 const { db, firebaseStatus } = initFirebase();
 console.log(`📡 Telegram Token: ${TELEGRAM_TOKEN ? TELEGRAM_TOKEN.substring(0, 10) + '...' : 'MISSING'}`);
 
