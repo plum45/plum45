@@ -3,22 +3,54 @@ require('dotenv').config({ path: path.join(__dirname, 'config/.env') });
 
 const express = require('express');
 const bodyParser = require('body-parser');
+const cors = require('cors');
+const fs = require('fs');
+const { OpenAI } = require('openai');
+const axios = require('axios');
+const { consolidateMemory } = require('./system/memory-consolidator');
+
+// Load System Prompts (OpenClaw Modular Architecture)
+const promptsDir = path.join(__dirname, 'system', 'prompts');
+const loadPrompt = (name) => {
+    try {
+        return fs.existsSync(path.join(promptsDir, name)) ? fs.readFileSync(path.join(promptsDir, name), 'utf8') : '';
+    } catch(e) { return ''; }
+};
+
+// We load these globally so they are fast to access
+let PROMPT_SOUL = loadPrompt('SOUL.md');
+let PROMPT_AGENTS = loadPrompt('AGENTS.md');
+let PROMPT_TOOLS = loadPrompt('TOOLS.md');
+
 const dns = require('dns');
 if (dns.setDefaultResultOrder) dns.setDefaultResultOrder('ipv4first');
 process.on('unhandledRejection', (reason, promise) => console.error('🔴 Unhandled Rejection:', reason));
 process.on('uncaughtException', (err) => console.error('🔴 Uncaught Exception:', err.message));
 
-const cors = require('cors');
-const fs = require('fs');
+// ========== PID LOCKING (Prevent Duplicates) ==========
+const PID_FILE = path.join(__dirname, '.stacy.pid');
+if (fs.existsSync(PID_FILE)) {
+    const oldPid = fs.readFileSync(PID_FILE, 'utf8');
+    try {
+        process.kill(oldPid, 0); // Check if process still exists
+        console.error(`❌ Duplicate Instance! Stacy is already running with PID ${oldPid}. Exiting...`);
+        process.exit(1);
+    } catch(e) { 
+        console.log(`⚠️ Cleaning up stale lockfile for PID ${oldPid}`);
+        fs.unlinkSync(PID_FILE); 
+    }
+}
+fs.writeFileSync(PID_FILE, process.pid.toString());
+process.on('exit', () => { if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE); });
+process.on('SIGINT', () => { if (fs.existsSync(PID_FILE)) fs.unlinkSync(PID_FILE); process.exit(); });
 
 // System Modules
-const { OpenAI } = require('openai');
 console.log("📦 Loading System Modules...");
 console.log("   - loading Database...");
-const { getBotMemory, saveBotMemory, getChatHistory, admin } = require('./system/database');
+const { getBotMemory, saveBotMemory, getChatHistory, admin, initFirebase } = require('./system/database');
 console.log("   - loading Calendar...");
 const { getGoogleCalendarEvents } = require('./system/calendar');
-console.log("   - loading Actions (Puppeteer might take long)...");
+console.log("   - loading Actions (Puppeteer might take long intersection)...");
 const { extractActions, handleAgentActions } = require('./system/actions');
 console.log("   - loading Bot logic...");
 const { setupBot } = require('./system/bot');
@@ -29,20 +61,23 @@ console.log("✅ Modules Loaded.");
 // ========== Configuration & Global State ==========
 const CONFIG = {
     PORT: process.env.PORT || 10000,
-    VERSION: '2.3.1-MODULAR',
-    MODEL: process.env.MODEL || 'stepfun-ai/step-3.5-flash',
-    NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions'
+    VERSION: '3.0.0-APEX',
+    // Recommendation: Use 70b or 8b for significantly faster responses than 405b
+    MODEL: process.env.MODEL || 'meta/llama-3.1-70b-instruct', 
+    NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
+    LOCAL_MODE: process.env.LOCAL_MODE === 'true'
 };
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
 const client = new OpenAI({
-    apiKey: NVIDIA_API_KEY,
-    baseURL: 'https://integrate.api.nvidia.com/v1'
+    apiKey: CONFIG.LOCAL_MODE ? 'ollama' : NVIDIA_API_KEY,
+    baseURL: CONFIG.LOCAL_MODE ? 'http://localhost:11434/v1' : 'https://integrate.api.nvidia.com/v1'
 });
+
 const TELEGRAM_TOKEN = (process.env.TELEGRAM_TOKEN || "").trim();
 const IS_RENDER = !!process.env.RENDER;
 
-// Storage Directories (User Request: System separately, Results separately)
+// Storage Directories
 const MASTER_DOC_PATH = "C:\\Users\\lgopl\\OneDrive\\เอกสาร\\stact doc";
 const docDir = IS_RENDER ? path.join(__dirname, 'Documents') : MASTER_DOC_PATH;
 const outputDir = path.join(__dirname, 'output');
@@ -52,10 +87,10 @@ const outputDir = path.join(__dirname, 'output');
 });
 
 // Initialize System Parts
-const { initFirebase } = require('./system/database');
 const { db, firebaseStatus } = initFirebase();
 console.log(`📡 Telegram Token: ${TELEGRAM_TOKEN ? TELEGRAM_TOKEN.substring(0, 10) + '...' : 'MISSING'}`);
-const bot = setupBot(TELEGRAM_TOKEN, CONFIG, { db, docDir, IS_RENDER });
+
+const bot = setupBot(TELEGRAM_TOKEN, CONFIG, { db, firebaseStatus, docDir, IS_RENDER });
 
 // Express Setup
 const app = express();
@@ -70,193 +105,152 @@ const tgContexts = new Map();
 async function processStacyAI(ctx, userMsg, fileContent = "") {
     const userId = ctx.from.id;
     const now = new Date();
-    const fullContextTime = now.toLocaleString('en-US', { timeZone: 'Asia/Bangkok' });
+    const fullContextTime = now.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', hour12: false });
+    
+    if (!tgContexts.has(userId)) {
+        tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
+    }
+    const userStore = tgContexts.get(userId);
 
     try {
-        const memory = await getBotMemory(userId);
-        
-        // Context Persistence Logic (Firestore Sync)
-        if (!tgContexts.has(userId)) {
-            const cloudHistory = await getChatHistory(userId, 10); // Load last 10 pairs
-            tgContexts.set(userId, { history: cloudHistory });
-            console.log(`[Memory Restored]: Loaded ${cloudHistory.length} messages for ${userId}`);
-        }
-        
-        const userStore = tgContexts.get(userId);
-
+        // 🚀 PARALLEL DATA FETCHING (Speed Boost)
+        const [memory, cloudHistory, skillsData] = await Promise.all([
+            getBotMemory(userId),
+            userStore.history.length === 0 ? getChatHistory(userId, 10) : Promise.resolve(null),
+            (userStore.skills && (Date.now() - userStore.lastSkillFetch < 300000)) 
+                ? Promise.resolve(userStore.skills) 
+                : (async () => {
+                    if (!db) return '';
+                    try {
+                        const snap = await db.collection('userActivities').doc(String(userId)).collection('skills').limit(20).get();
+                        const skills = snap.empty ? '' : "\n**🛠️ INSTALLED SKILLS:**\n" + snap.docs.map(d => d.data().instructions).join('\n\n') + "\n";
+                        userStore.skills = skills;
+                        userStore.lastSkillFetch = Date.now();
+                        return skills;
+                    } catch (e) { return ''; }
+                })()
+        ]);
+        if (cloudHistory) userStore.history = cloudHistory;
+        const skillsBlock = skillsData;
         const finalInput = fileContent ? `[ATTACHED DATA: ${fileContent}]\n\nUser: ${userMsg}` : userMsg;
 
-        // Skill Injection
-        let skillsBlock = '';
-        if (db) {
+        let systemPrompt = "";
+        const lowerMsg = userMsg.toLowerCase();
+        let isFastPath = false;
+
+        if (lowerMsg.includes('เช็คคอม') || lowerMsg.includes('สเปกคอม') || lowerMsg.includes('pc stat')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือเช็คคอม: [ACTION: GET_PC_STATS {}]`;
+            isFastPath = true;
+        } else if (lowerMsg.includes('ลงเวลา') || lowerMsg.includes('จด log') || lowerMsg.includes('work log')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงเวลาทำงาน: [ACTION: WORK_LOG {"task": "...", "duration": "..."}]`;
+            isFastPath = true;
+        } else if (lowerMsg.includes('ปฏิทิน') || lowerMsg.includes('นัดหมาย') || lowerMsg.includes('นัด') || lowerMsg.includes('calendar')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "...", "end": "..."}]`;
+            isFastPath = true;
+        } else if (userStore.thinkingMode === false || (userMsg.length < 80 && !lowerMsg.includes('ค้นหา') && !lowerMsg.includes('วิจัย') && !lowerMsg.includes('ทอง') && !lowerMsg.includes('ข่าว') && !lowerMsg.includes('ราคา'))) {
+            // Very Fast Path for simple chat
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายของคุณ Snow ตอบสั้นๆ [🕒 ${fullContextTime}]`;
+        } else {
+            // Modular Smart Mode (OpenClaw Architecture)
+            PROMPT_SOUL = loadPrompt('SOUL.md') || PROMPT_SOUL;
+            PROMPT_AGENTS = loadPrompt('AGENTS.md') || PROMPT_AGENTS;
+            PROMPT_TOOLS = loadPrompt('TOOLS.md') || PROMPT_TOOLS;
+            
+            const facts = Array.isArray(memory.facts) ? memory.facts.slice(-5).join('; ') : "";
+            
+            // Read Workspace Memory (OpenClaw style)
+            let workspaceMem = "";
             try {
-                const skillsSnap = await db.collection('userActivities').doc(String(userId)).collection('skills').limit(20).get();
-                if (!skillsSnap.empty) {
-                    skillsBlock = "\n**🛠️ INSTALLED SKILLS:**\n" + skillsSnap.docs.map(d => ` • [${d.id}]: ${d.data().description}`).join('\n') + "\n";
-                }
-            } catch (e) { console.warn('[Skills Inject] Failed'); }
+                const memPath = path.join(__dirname, 'workspace', String(userId), 'MEMORY.md');
+                if (fs.existsSync(memPath)) workspaceMem = fs.readFileSync(memPath, 'utf8');
+            } catch(e) {}
+
+            systemPrompt = `${PROMPT_SOUL}\n\n${PROMPT_AGENTS}\n\n${PROMPT_TOOLS}\n\n## FIREBASE FACTS (Short-Term):\n${facts}\n\n## WORKSPACE RAM (Long-Term MEMORY.md):\n${workspaceMem}\n\n[🕒 CURRENT TIME: ${fullContextTime}]\n`;
         }
 
-        const systemPrompt = `หนูคือ Stacy Premium AI (v3.0.0-APEX) **"The Ultimate Office Secretary & Expert Researcher"**
-หนูทำงานบนคอมพิวเตอร์หลักของคุณ Snow (Local Mode: Chrome/Edge integration)
-
-**══════════════════════════════════════════**
-**🕒 Timezone: Asia/Bangkok (GMT+7)**
-**📅 วันเวลาปัจจุบัน: ${fullContextTime}**
-**⚠️ กฎเหล็ก: เมื่อสร้าง ACTION ต้องใช้วันที่จาก "วันเวลาปัจจุบัน" ด้านบนเสมอ ห้ามเดาวันที่เอง!**
-**══════════════════════════════════════════**
-
-**══ PERSONA & SOUL ══**
-- Stacy: เป็นเลขาอัจฉริยะและ AI Agent ระดับสูงที่มีความเชี่ยวชาญด้านการวิเคราะห์ข้อมูลและการค้นคว้าเชิงลึก (Expert Researcher & Analyst) ใช้สรรพนามแทนตัวว่า "หนู" และเรียกผู้สนทนาว่า "เจ้านาย" หรือ "คุณ Snow"
-- บุคลิก: พูดจาสุภาพ เป็นมืออาชีพ แต่แฝงความขี้เล่นและเข้าอกเข้าใจเสมือนเพื่อนคู่คิด
-- การตอบกลับ: อธิบายให้เข้าใจง่าย มี Emoji สดใส และลงท้ายคำตอบด้วย [🕒 ${fullContextTime}]
-- Output Format: **ใช้ Bullet points ในการแจกแจงข้อมูลที่ซับซ้อน และต้องแนบรายการอ้างอิง (Sources/Links) ไว้ท้ายคำตอบเสนอเมื่อให้ข้อมูลเชิงลึก**
-
-**══ EXPERT RESEARCHER GUIDELINES (กฎเหล็กการค้นคว้า) ══**
-1. **Never Assume:** ห้ามคาดเดาข้อมูลที่ไม่มีในแหล่งอ้างอิง หากไม่แน่ใจให้ใช้เครื่องมือค้นหาเพิ่ม (WEB_SEARCH) ทันที
-2. **Source Integrity:** ทุกคำตอบต้องระบุแหล่งที่มา (Source) หรือลิงก์อ้างอิงเสมอ
-3. **Date Awareness:** ตรวจสอบวันที่ของข้อมูลเสมอ (ปัจจุบันคือปี 2026) หากข้อมูลเก่าเกินให้แจ้งเจ้านาย
-4. **I Don't Know:** หากหาข้อมูลไม่พบจริงๆ ให้ตอบตรงๆ ว่า "ไม่พบข้อมูลจากแหล่งที่เชื่อถือได้" ห้ามมโนคำตอบเองเด็ดขาด
-
-**══ THINKING PROCESS (CHAIN OF THOUGHT) ══**
-ก่อนตอบคำถามค้นคว้า เชิงลึก ให้ทำกระบวนการตามนี้:
-1. [ANALYSIS]: วิเคราะห์คำถามเจ้านายว่าต้องการข้อเท็จจริง วิธีการ หรือการวิเคราะห์
-2. [PLANNING]: ออกแบบคำค้นหา (Search Queries) อย่างน้อย 3 รูปแบบ เพื่อมุมมองที่ครอบคลุม
-3. [EVALUATION]: เปรียบเทียบข้อมูลจากแต่ละแหล่ง ให้น้ำหนักกับแหล่งที่น่าเชื่อถือ (เช่น เว็บทางการ/วิชาการ)
-4. [REFINEMENT]: หากไม่ชัดเจน ให้ Search ซ้ำชดเชยจุดอ่อนรอยรั่ว
-5. [SYNTHESIS]: สรุปคำตอบให้กระชับ เข้าใจง่าย ตรงประเด็น แยกแยะระหว่างข้อเท็จจริงกับการวิเคราะห์
-
-**══ ACTION SCHEMAS (CRITICAL - ต้องใส่ ACTION ทุกครั้งที่เกี่ยวข้อง) ══**
-📅 **ปฏิทิน/เวลา** (เมื่อเจ้านายพูดว่า ลงเวลา/ลงปฏิทิน/นัดหมาย/ตารางงาน):
-  [ACTION: WORK_LOG {"task": "ชื่องาน", "duration": "2 ชั่วโมง"}]
-  [ACTION: ADD_CALENDAR_EVENT {"title": "ชื่อกิจกรรม", "start": "YYYY-MM-DDTHH:MM:SS", "end": "YYYY-MM-DDTHH:MM:SS"}]
-  [ACTION: ADD_TASK {"title": "ชื่อ task", "priority": "low|medium|high"}]
-
-🔍 **ค้นหา/วิจัย** (เมื่อต้องหาข้อมูลเจาะลึก):
-  [ACTION: WEB_SEARCH {"query": "..."}]
-  [ACTION: IMAGE_SEARCH {"query": "..."}]
-  [ACTION: WEB_BROWSE {"url": "https://..."}]
-  [ACTION: WEB_ANALYZER {"url": "https://...", "type": "summary"}]
-  [ACTION: FETCH_API {"url": "https://..."}]
-
-📝 **เอกสาร**:
-  [ACTION: CREATE_WORD {"title": "...", "sections": [{"heading": "...", "text": "..."}]}]
-  [ACTION: CREATE_EXCEL {"title": "...", "headers": [...], "rows": [[...]]}]
-  [ACTION: CREATE_SLIDE {"title": "...", "slides": [{"title": "...", "content": "..."}]}]
-
-💻 **ระบบ**:
-  [ACTION: SCREEN_CAPTURE {}]
-  [ACTION: GET_PC_STATS {}]
-  [ACTION: SYSTEM_CONTROL {"command": "SHUTDOWN|RESTART|WAKE"}]
-
-🎨 **สร้างสรรค์**:
-  [ACTION: IMAGE_GEN {"prompt": "..."}]
-
-🌐 **แปลภาษา**:
-  [ACTION: TRANSLATE {"text": "ข้อความ", "from": "th", "to": "en"}]
-
-💱 **เงินตรา**:
-  [ACTION: CURRENCY {"amount": 100, "from": "USD", "to": "THB"}]
-
-📰 **ข่าวสาร**:
-  [ACTION: NEWS {"category": "technology"}]
-
-⏰ **เตือนความจำ**:
-  [ACTION: REMINDER {"message": "สิ่งที่ต้องทำ", "minutes": 30}]
-
-☀️ **สรุปวันนี้**:
-  [ACTION: DAILY_BRIEF {}]
-
-${skillsBlock}
-${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map(f => '• ' + f).join('\n')}` : ''}
-`;
-
+        console.log(`[AI Request] Model: ${CONFIG.MODEL}`);
         const typingInterval = setInterval(() => ctx.sendChatAction('typing').catch(() => {}), 4000);
 
         try {
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
+                    { role: 'system', content: "CRITICAL: You ARE Stacy. You have FULL WEB ACCESS. If the user asks for real-time info, gold, or news, you MUST use either [ACTION: WEB_SEARCH] or [ACTION: GOOGLE_SEARCH]. DO NOT apologize. DO NOT say you cannot. YOU HAVE THE TOOL." },
                     { role: 'system', content: systemPrompt },
-                    ...userStore.history.slice(-20),
+                    ...userStore.history.slice(-10),
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 0.7,
+                temperature: 1.0,
+                max_tokens: 8192,
+                top_p: 0.95,
                 stream: true
             });
 
             let fullReply = "";
             let reasoning = "";
+            let streamText = "";
+            let lastEditTime = 0;
+            let statusMsg = null;
+            let statusTimer = null;
+
+            if (userStore.thinkingMode !== false) {
+                statusTimer = setTimeout(async () => {
+                   try { statusMsg = await ctx.reply("🧠 **Stacy กำลังประมวลผลความคิดอยู่ค่ะ...**"); } catch(e) {}
+                }, 500); // Reduced from 1500ms to 500ms for faster feel
+            }
 
             for await (const chunk of stream) {
+                if (statusTimer) { clearTimeout(statusTimer); statusTimer = null; }
                 const delta = chunk.choices[0]?.delta;
-                if (delta?.reasoning_content) {
-                    reasoning += delta.reasoning_content;
-                }
+                
+                if (delta?.reasoning_content) reasoning += delta.reasoning_content;
                 if (delta?.content) {
                     fullReply += delta.content;
+                    streamText += delta.content;
+                }
+
+                const nowEdit = Date.now();
+                if (statusMsg && (nowEdit - lastEditTime > 1000)) {
+                    let displayMsg = streamText
+                        .replace(/\[ACTION:[\s\S]*?\]/g, '')
+                        .replace(/<think>[\s\S]*?<\/think>/g, '')
+                        .replace(/<think>[\s\S]*/g, '')
+                        .trim();
+                    
+                    if (displayMsg.length > 2 || isFastPath) {
+                        const finalDisplay = displayMsg.substring(0, 3800) + (displayMsg.length > 3800 ? "..." : "");
+                        ctx.telegram.editMessageText(ctx.chat.id, statusMsg.message_id, null, `📡 **Stacy กำลังตอบกลับ...**\n\n${finalDisplay || "..."}`).catch(() => {});
+                        lastEditTime = nowEdit;
+                    }
                 }
             }
-
+            
             if (reasoning) console.log(`🧠 [Stacy Reasoning]: ${reasoning}`);
             const reply = fullReply || "ขอโทษทีค่ะ หนูคิดอะไรไม่ออกเลย";
-            console.log(`[AI Response for ${userId}]: ${reply ? reply.substring(0, 200) : "No text content"}...`);
+            console.log(`[RAW_AI_RESPONSE]:\n${reply}\n-------------------`);
+            
             let { cleanText, actions } = extractActions(reply);
             
-            // ══ SMART FALLBACK: Auto-detect actions from user message if AI didn't produce any ══
-            if (actions.length === 0) {
-                const msg = userMsg.toLowerCase();
-                const now = new Date();
-                const toLocalISO = (dt) => {
-                    const pad = (n) => String(n).padStart(2, '0');
-                    return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}+07:00`;
-                };
-
-                // ลงเวลา / บันทึกเวลา / log เวลา
-                if (/ลงเวลา|บันทึกเวลา|log\s*เวลา|work\s*log/i.test(userMsg)) {
-                    // Extract task & duration from user message 
-                    const durMatch = userMsg.match(/(\d+)\s*(ชั่วโมง|ชม\.|hr|hour|นาที|min)/i);
-                    const duration = durMatch ? `${durMatch[1]} ${durMatch[2]}` : '1 ชม.';
-                    // Strip known keywords to get the task description
-                    const task = userMsg.replace(/ลงเวลา|บันทึกเวลา|log\s*เวลา|work\s*log|\d+\s*(ชั่วโมง|ชม\.|hr|hour|นาที|min)|ลงปฏิทิน(ด้วย|ให้หนู)?(นะ|ด้วย|เลย)?/gi, '').trim() || 'งานทั่วไป';
-                    
-                    console.log(`[Smart Fallback] WORK_LOG detected: task="${task}", duration="${duration}"`);
-                    actions.push({ type: 'WORK_LOG', data: { task, duration } });
-                }
-                
-                // ลงปฏิทิน / บันทึกปฏิทิน / calendar
-                if (/ลงปฏิทิน|บันทึกปฏิทิน|ลง\s*calendar|add.*calendar/i.test(userMsg)) {
-                    const durMatch = userMsg.match(/(\d+)\s*(ชั่วโมง|ชม\.|hr|hour|นาที|min)/i);
-                    const durationMs = durMatch ? parseInt(durMatch[1]) * (durMatch[2].match(/นาที|min/i) ? 60000 : 3600000) : 3600000;
-                    const title = userMsg.replace(/ลงปฏิทิน(ด้วย|ให้หนู)?(นะ|ด้วย|เลย)?|บันทึกปฏิทิน|ลง\s*calendar|add.*calendar|\d+\s*(ชั่วโมง|ชม\.|hr|hour|นาที|min)/gi, '').trim() || 'กิจกรรมจาก Stacy';
-                    
-                    console.log(`[Smart Fallback] ADD_CALENDAR_EVENT detected: title="${title}"`);
-                    actions.push({ 
-                        type: 'ADD_CALENDAR_EVENT', 
-                        data: { 
-                            title, 
-                            start: toLocalISO(now), 
-                            end: toLocalISO(new Date(now.getTime() + durationMs)) 
-                        } 
-                    });
-                }
-
-                if (actions.length > 0) {
-                    console.log(`[Smart Fallback] Auto-created ${actions.length} action(s) from user message`);
-                }
-            }
+            if (statusMsg) ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
             
             await smartReply(ctx, cleanText || "หนูกำลังประมวลผลข้อมูลอยู่ค่ะเจ้านาย...");
             
-            for (const action of actions) {
-                console.log(`[Action Execute] Type: ${action.type}, Data:`, JSON.stringify(action.data));
-                await handleAgentActions(ctx, action.type, action.data, userId, { db, docDir, IS_RENDER, bot });
+            if (actions.length > 0) {
+                for (const action of actions) {
+                    console.log(`[Action Execute] Type: ${action.type}, Data:`, JSON.stringify(action.data));
+                    await handleAgentActions(ctx, action.type, action.data, userId, { db, docDir, IS_RENDER, bot, client });
+                }
             }
 
             userStore.history.push({ role: 'user', content: finalInput }, { role: 'assistant', content: reply });
-            if (userStore.history.length > 40) userStore.history.splice(0, 2);
+            if (userStore.history.length > 40) userStore.history.shift();
             saveBotMemory(userId, finalInput, reply);
             
+            if (userStore.history.length >= 20) {
+                setImmediate(() => {
+                    consolidateMemory(userId, userStore.history, client, db).catch(e => console.warn('[Consolidator] Background task failed:', e.message));
+                });
+            }
         } finally {
             clearInterval(typingInterval);
         }
@@ -266,17 +260,44 @@ ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map
     }
 }
 
-// ========== Bot Events Mounting ==========
-    if (bot) {
-        bot.telegram.getMe().then(me => {
-            console.log(`📡 Connected as @${me.username} (${me.first_name})`);
-        }).catch(err => {
-            console.error(`❌ getMe Failed: ${err.message}`);
-        });
+if (bot) {
+    bot.telegram.getMe().then(me => console.log(`📡 Connected as @${me.username}`)).catch(err => console.error(`❌ getMe Failed: ${err.message}`));
 
-        bot.on('text', async (ctx) => {
-        console.log(`[Telegram Message] From ${ctx.from.first_name} (${ctx.from.id}): ${ctx.message.text}`);
-        if (ctx.chat.type === 'private') await processStacyAI(ctx, ctx.message.text);
+    bot.on('text', async (ctx) => {
+        const userId = ctx.from.id;
+        const msg = ctx.message.text.trim();
+        console.log(`[Telegram Message] From ${userId}: ${msg}`);
+
+        if (msg === '/clear') {
+            const userStore = tgContexts.get(userId);
+            if (userStore) {
+                userStore.history = [];
+                userStore.lastSkillFetch = 0;
+            }
+            if (db) {
+                try {
+                    await db.collection('userActivities').doc(String(userId)).update({ 'memory.facts': [] });
+                } catch(e) {}
+            }
+            await ctx.reply("🧹 **ล้างสมองและประวัติการคุยให้เรียบร้อยแล้วค่ะ!**\nหนูจำอะไรก่อนหน้านี้ไม่ได้แล้วนะคะ เจ้านายเริ่มสั่งงานใหม่ได้เลยค่ะ ✨");
+            return;
+        }
+
+        if (msg.startsWith('/think')) {
+            if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0 });
+            const userStore = tgContexts.get(userId);
+            
+            if (msg === '/think off' || msg === '/think 0' || msg === '/think false') {
+                userStore.thinkingMode = false;
+                return ctx.reply("✅ **ปิดโหมดคิดเชิงลึกแล้วค่ะ** (โหมดประหยัดเวลา/ตอบไว) ✨");
+            } else {
+                userStore.thinkingMode = true;
+                userStore.lastSkillFetch = 0;
+                return ctx.reply("🧠 **เปิดโหมดคิดเชิงลึกแล้วค่ะ** (โหมดวิเคราะห์/ละเอียด/มีระบบ) ✨");
+            }
+        }
+
+        if (ctx.chat.type === 'private') await processStacyAI(ctx, msg);
     });
 
     bot.on('document', async (ctx) => {
@@ -293,33 +314,6 @@ ${memory.facts.length > 0 ? `**══ MASTER MEMORY ══**\n${memory.facts.map
         .then(() => console.log('🚀 Stacy Modular Assistant is running...'))
         .catch(err => console.error('❌ Bot Launch Error:', err.message));
 }
-
-// ========== Server Launch ==========
-
-// ========== Dashboard API Routes ==========
-app.get('/api/calendar', async (req, res) => {
-    try {
-        const userId = req.query.userId || 'me';
-        const googleEvents = await getGoogleCalendarEvents();
-        
-        let firebaseTasks = [];
-        if (db) {
-            const snap = await db.collection('userActivities').doc(String(userId)).collection('tasks').limit(100).get();
-            firebaseTasks = snap.docs.map(doc => ({
-                id: doc.id,
-                ...doc.data(),
-                type: 'local'
-            }));
-        }
-        
-        // Merge and sort
-        const allEvents = [...googleEvents, ...firebaseTasks].sort((a,b) => 
-            new Date(a.start || a.time) - new Date(b.start || b.time)
-        );
-        
-        res.json(allEvents);
-    } catch (e) { res.status(500).json({ error: e.message }); }
-});
 
 app.listen(CONFIG.PORT, () => {
     console.log(`📡 Stacy Web Dashboard active on port ${CONFIG.PORT}`);
