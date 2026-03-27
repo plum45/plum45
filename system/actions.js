@@ -53,28 +53,34 @@ function extractActions(text) {
     let cleanText = text;
 
     // Use bracket-aware parser instead of regex (regex breaks on nested [] in JSON)
+    // Robust check: If model forgot '[' but started with 'ACTION:', wrap it.
+    let textToParse = text;
+    if (!textToParse.includes('[ACTION:') && textToParse.includes('ACTION:')) {
+        textToParse = textToParse.replace(/(ACTION:\s*[A-Z_]+[\s\S]*?)(?=\n|\[ACTION:|$)/g, '[$1]');
+    }
+
     const marker = '[ACTION:';
     let searchFrom = 0;
 
     while (true) {
-        const start = text.indexOf(marker, searchFrom);
+        const start = textToParse.indexOf(marker, searchFrom);
         if (start === -1) break;
 
         // Extract action type (e.g., CREATE_EXCEL)
         const afterMarker = start + marker.length;
         let typeEnd = afterMarker;
-        while (typeEnd < text.length && /\s/.test(text[typeEnd])) typeEnd++; // skip spaces
+        while (typeEnd < textToParse.length && /\s/.test(textToParse[typeEnd])) typeEnd++; // skip spaces
         let typeEndPos = typeEnd;
-        while (typeEndPos < text.length && /[A-Z_]/.test(text[typeEndPos])) typeEndPos++;
-        const type = text.substring(typeEnd, typeEndPos);
+        while (typeEndPos < textToParse.length && /[A-Z_]/.test(textToParse[typeEndPos])) typeEndPos++;
+        const type = textToParse.substring(typeEnd, typeEndPos);
 
         // Now find the matching closing ] by counting brackets
         let depth = 1; // we already consumed the opening [
         let pos = typeEndPos;
         let inString = false, escape = false;
 
-        while (pos < text.length && depth > 0) {
-            const c = text[pos];
+        while (pos < textToParse.length && depth > 0) {
+            const c = textToParse[pos];
             if (escape) { escape = false; pos++; continue; }
             if (c === '\\') { escape = true; pos++; continue; }
             if (c === '"') { inString = !inString; pos++; continue; }
@@ -85,8 +91,8 @@ function extractActions(text) {
             pos++;
         }
 
-        const fullMatch = text.substring(start, pos);
-        const dataStr = text.substring(typeEndPos, pos - 1).trim();
+        const fullMatch = textToParse.substring(start, pos);
+        const dataStr = textToParse.substring(typeEndPos, pos - 1).trim();
 
         try {
             let data;

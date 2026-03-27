@@ -165,13 +165,13 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
         let isFastPath = false;
 
         if (lowerMsg.includes('เช็คคอม') || lowerMsg.includes('สเปกคอม') || lowerMsg.includes('pc stat')) {
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือเช็คคอม: [ACTION: GET_PC_STATS {}]`;
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือเช็คคอม: [ACTION: GET_PC_STATS {}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
         } else if (lowerMsg.includes('ลงเวลา') || lowerMsg.includes('จด log') || lowerMsg.includes('work log')) {
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงเวลาทำงาน: [ACTION: WORK_LOG {"task": "...", "duration": "..."}]`;
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงเวลาทำงาน: [ACTION: WORK_LOG {"task": "...", "duration": "..."}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
         } else if (lowerMsg.includes('ปฏิทิน') || lowerMsg.includes('นัดหมาย') || lowerMsg.includes('นัด') || lowerMsg.includes('calendar')) {
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "...", "end": "..."}]`;
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "...", "end": "..."}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
         } else if (userStore.thinkingMode === false || (userMsg.length < 80 && !lowerMsg.includes('ค้นหา') && !lowerMsg.includes('วิจัย') && !lowerMsg.includes('ทอง') && !lowerMsg.includes('ข่าว') && !lowerMsg.includes('ราคา'))) {
             // Very Fast Path for simple chat
