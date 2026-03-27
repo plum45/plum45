@@ -363,6 +363,15 @@ if (bot) {
         .catch(err => console.error('❌ Bot Launch Error:', err.message));
 }
 
+app.get('/ping', (req, res) => res.send('pong'));
+
+// Self-ping to stay awake on Render (Free Tier)
+if (IS_RENDER) {
+    setInterval(() => {
+        axios.get(`https://plum45.onrender.com/ping`).catch(() => {});
+    }, 10 * 60 * 1000); // Every 10 minutes
+}
+
 app.listen(CONFIG.PORT, () => {
     console.log(`📡 Stacy Web Dashboard active on port ${CONFIG.PORT}`);
     console.log(`🔥 Firebase Status: ${firebaseStatus}`);
