@@ -632,12 +632,24 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
         case 'ADD_CALENDAR_EVENT':
             try {
                 const { addGoogleCalendarEvent } = require('./calendar');
-                const event = await addGoogleCalendarEvent(data.title, data.start, data.end, data.description || '');
+                // Auto-convert Buddhist Era (BE) year to Common Era (CE)
+                // e.g. 2569 → 2026, 2568 → 2025
+                const fixBEYear = (dateStr) => {
+                    if (!dateStr) return dateStr;
+                    return dateStr.replace(/^(\d{4})/, (y) => {
+                        const year = parseInt(y);
+                        return year > 2500 ? String(year - 543) : y;
+                    });
+                };
+                const fixedStart = fixBEYear(data.start);
+                const fixedEnd = fixBEYear(data.end);
+                console.log(`[Calendar] Original: ${data.start} → Fixed: ${fixedStart}`);
+                const event = await addGoogleCalendarEvent(data.title, fixedStart, fixedEnd, data.description || '');
                 await ctx.reply(`📅 **สร้างนัดหมายสำเร็จค่ะ!**\n📌 ${event.summary}\n🔗 ${event.htmlLink}`);
                 await logToTerminal(userId, 'ADD_CALENDAR_EVENT', `Created: ${event.summary}`);
             } catch (err) {
-                console.error('ADD_CALENDAR_EVENT Error:', err);
-                ctx.reply(`❌ บันทึกนัดหมายไม่สำเร็จ: ${err.message}`);
+                console.error('ADD_CALENDAR_EVENT Error:', err.message || err);
+                ctx.reply(`❌ บันทึกนัดหมายไม่สำเร็จ: ${err.message}\n\n💡 ลองสั่งใหม่ด้วยรูปแบบ: "ลงปฏิทิน ชื่อ วันที่ เวลา"`);
             }
             break;
 
