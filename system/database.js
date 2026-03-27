@@ -8,9 +8,18 @@ let firebaseStatus = "Disconnected";
 function initFirebase() {
     try {
         let serviceAccount = null;
-        if (process.env.FIREBASE_SERVICE_ACCOUNT_JSON) {
-            serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON);
-        } else if (process.env.FIREBASE_PRIVATE_KEY) {
+        const fbKey = process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT;
+        if (fbKey) {
+            console.log(`📡 [Firebase] Found environment variable (Length: ${fbKey.length})`);
+            try {
+                serviceAccount = JSON.parse(fbKey);
+                console.log("✅ [Firebase] JSON parsed successfully.");
+            } catch (e) {
+                console.error("❌ [Firebase] JSON parse failed. checking if raw fields exist...");
+            }
+        }
+        
+        if (!serviceAccount && process.env.FIREBASE_PRIVATE_KEY) {
             serviceAccount = {
                 projectId: process.env.FIREBASE_PROJECT_ID,
                 clientEmail: process.env.FIREBASE_CLIENT_EMAIL,

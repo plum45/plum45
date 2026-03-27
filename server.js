@@ -90,7 +90,8 @@ const outputDir = path.join(__dirname, 'output');
 const configDir = path.join(__dirname, 'config');
 const setupKeyFile = (envVar, filename) => {
     const filePath = path.join(configDir, filename);
-    if (!fs.existsSync(filePath) && process.env[envVar]) {
+    // On Render, ALWAYS overwrite to ensure fresh credentials from Env Vars
+    if (process.env[envVar] && (IS_RENDER || !fs.existsSync(filePath))) {
         try {
             console.log(`📡 Recreating config/${filename} from environment variable...`);
             fs.writeFileSync(filePath, process.env[envVar].trim());
