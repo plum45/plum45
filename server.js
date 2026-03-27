@@ -305,6 +305,22 @@ if (bot) {
             await ctx.reply("🧹 **ล้างสมองและประวัติการคุยให้เรียบร้อยแล้วค่ะ!**\nหนูจำอะไรก่อนหน้านี้ไม่ได้แล้วนะคะ เจ้านายเริ่มสั่งงานใหม่ได้เลยค่ะ ✨");
             return;
         }
+        
+        if (msg === '/status') {
+            const fbIcon = firebaseStatus.includes('Connected') ? '🟢' : '🔴';
+            const calKey = path.join(configDir, 'google-calendar-key.json');
+            const calIcon = fs.existsSync(calKey) ? '🟢' : '🔴';
+            
+            let statusText = `📊 **Stacy System Status**\n\n`;
+            statusText += `${fbIcon} **Firebase:** ${firebaseStatus}\n`;
+            statusText += `${calIcon} **Google Calendar Key:** ${fs.existsSync(calKey) ? 'Found' : 'Missing'}\n`;
+            statusText += `🕒 **Local Time:** ${new Date().toLocaleString('th-TH')}\n`;
+            statusText += `🤖 **Model:** ${CONFIG.MODEL}\n`;
+            statusText += `🌐 **Environment:** ${IS_RENDER ? 'Render Cloud' : 'Local PC'}\n\n`;
+            statusText += `🔗 **Dashboard:** https://plum45.onrender.com`;
+            
+            return ctx.reply(statusText, { parse_mode: 'Markdown' });
+        }
 
         if (msg.startsWith('/think')) {
             if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0 });
