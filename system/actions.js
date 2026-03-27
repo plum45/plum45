@@ -487,6 +487,7 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     const pad = (n) => String(n).padStart(2, '0');
                     return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}+07:00`;
                 };
+                if (!db) throw new Error('ฐานข้อมูล (Firebase) ไม่ได้เชื่อมต่อค่ะ กรุณาเช็คค่า FIREBASE_SERVICE_ACCOUNT ใน Render นะคะ');
                 const now = new Date();
                 const localNow = toLocalISO(now);
 
@@ -520,8 +521,8 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     status: 'pending',
                     createdAt: new Date()
                 });
-                ctx.reply(`📌 **เพิ่มงานลงในรายการ To-Do ให้แล้วนะจ๊ะ!**\n🔹 ${title} (ระดับความสำคัญ: ${data.priority || 'ปกติ'})`);
-            } catch (err) { ctx.reply(`❌ เพิ่มงานไม่สำเร็จ: ${err.message}`); }
+                ctx.reply(`📌 **เพิ่มงานลงในรายการ To-Do ให้แล้วนะจ๊ะ!**\n🔹 ${title} (ระดับความสำคัญ: ${data.priority || 'ปกติ'})\n\n🔗 **เช็คหน้า Dashboard:** https://plum45.onrender.com`);
+            } catch (err) { ctx.reply(`❌ เพิ่มงานไม่สำเร็จ: ${err.message}\n\n💡 *เจ้านายลองเช็คว่าได้ตั้งค่า FIREBASE_SERVICE_ACCOUNT ใน Render หรือยังนะคะ*`); }
             break;
 
         case 'IMAGE_GEN':
