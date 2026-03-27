@@ -170,12 +170,30 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
         } else if (lowerMsg.includes('ลงเวลา') || lowerMsg.includes('จด log') || lowerMsg.includes('work log')) {
             systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงเวลาทำงาน: [ACTION: WORK_LOG {"task": "...", "duration": "..."}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
-        } else if (lowerMsg.includes('ปฏิทิน') || lowerMsg.includes('นัดหมาย') || lowerMsg.includes('นัด') || lowerMsg.includes('calendar')) {
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "...", "end": "..."}] (ต้องมี [ ] เสมอ)`;
+        } else if (lowerMsg.includes('ปฏิทิน') || lowerMsg.includes('นัดหมาย') || lowerMsg.includes('calendar') || lowerMsg.includes('ลงตาราง')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}] (ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}`;
+            isFastPath = true;
+        } else if (lowerMsg.includes('แจ้งเตือน') || lowerMsg.includes('เตือน') || lowerMsg.includes('remind') || lowerMsg.includes('ตั้งเวลา') || lowerMsg.includes('alarm')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือแจ้งเตือน:
+- ลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}]
+- ตั้งเวลาเตือน: [ACTION: REMINDER {"message": "...", "delay_minutes": 10}]
+- ตั้ง Cron Job: [ACTION: SCHEDULE_TASK {"name": "...", "schedule": "*/10 8-9 * * *", "task": "..."}]
+(ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}
+ถ้าเจ้านายขอ "แจ้งเตือนทุก 10 นาที ก่อนเวลา 1 ชม" ให้ใช้ SCHEDULE_TASK กับ cron ที่ทำงานทุก 10 นาทีในช่วงเวลาที่กำหนด`;
+            isFastPath = true;
+        } else if (lowerMsg.includes('นัด') || lowerMsg.includes('พรุ่งนี้') || lowerMsg.includes('มะรืน') || lowerMsg.includes('ขึ้นรถ') || lowerMsg.includes('ไปทำงาน') || lowerMsg.includes('ประชุม')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายต้องการจัดตารางเวลา หนูมีเครื่องมือ:
+- ลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}]
+- ตั้งเวลาเตือน: [ACTION: REMINDER {"message": "...", "delay_minutes": 10}]
+- ตั้ง Cron Job: [ACTION: SCHEDULE_TASK {"name": "...", "schedule": "30 9 * * *", "task": "..."}]
+(ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}
+สร้าง Action ที่เหมาะสมจากบริบทของเจ้านาย`;
             isFastPath = true;
         } else if (userStore.thinkingMode === false || (userMsg.length < 80 && !lowerMsg.includes('ค้นหา') && !lowerMsg.includes('วิจัย') && !lowerMsg.includes('ทอง') && !lowerMsg.includes('ข่าว') && !lowerMsg.includes('ราคา'))) {
-            // Very Fast Path for simple chat
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายของคุณ Snow ตอบสั้นๆ [🕒 ${fullContextTime}]`;
+            // Very Fast Path for simple chat — but STILL include basic tool context
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายของคุณ Snow ตอบสั้นๆ [🕒 ${fullContextTime}]
+หนูมีเครื่องมือ: [ACTION: ADD_CALENDAR_EVENT {...}], [ACTION: WORK_LOG {...}], [ACTION: REMINDER {...}], [ACTION: SCHEDULE_TASK {...}], [ACTION: GET_PC_STATS {}]
+ถ้าเจ้านายขอให้ทำอะไร ให้ใช้ ACTION ที่เหมาะสม ถ้าแค่คุยก็ตอบสั้นๆ`;
         } else {
             // Modular Smart Mode (OpenClaw Architecture)
             PROMPT_SOUL = loadPrompt('SOUL.md') || PROMPT_SOUL;
