@@ -104,7 +104,16 @@ const setupKeyFile = (envVar, filename) => {
 setupKeyFile('GOOGLE_CALENDAR_KEY', 'google-calendar-key.json');
 setupKeyFile('FIREBASE_SERVICE_ACCOUNT', 'serviceAccountKey.json');
 
-const { db, firebaseStatus } = initFirebase();
+let db = null;
+let firebaseStatus = "🔴 Not Initialized";
+
+try {
+    const fb = initFirebase();
+    db = fb.db;
+    firebaseStatus = fb.firebaseStatus;
+} catch (e) {
+    console.error("❌ Critical Firebase Initialization Error:", e.message);
+}
 console.log(`📡 Telegram Token: ${TELEGRAM_TOKEN ? TELEGRAM_TOKEN.substring(0, 10) + '...' : 'MISSING'}`);
 
 const bot = setupBot(TELEGRAM_TOKEN, CONFIG, { db, firebaseStatus, docDir, IS_RENDER });

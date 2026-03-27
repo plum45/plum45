@@ -19,16 +19,18 @@ function initFirebase() {
             }
         }
         
-        if (!serviceAccount && process.env.FIREBASE_PRIVATE_KEY) {
-            serviceAccount = {
-                projectId: process.env.FIREBASE_PROJECT_ID,
-                clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-                privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-            };
-        } else {
-            const keyPath = path.join(__dirname, '../config/serviceAccountKey.json');
-            if (fs.existsSync(keyPath)) {
-                serviceAccount = require(keyPath);
+        if (!serviceAccount) {
+            if (process.env.FIREBASE_PRIVATE_KEY) {
+                serviceAccount = {
+                    projectId: process.env.FIREBASE_PROJECT_ID,
+                    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+                    privateKey: process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+                };
+            } else {
+                const keyPath = path.join(__dirname, '../config/serviceAccountKey.json');
+                if (fs.existsSync(keyPath)) {
+                    serviceAccount = require(keyPath);
+                }
             }
         }
 
