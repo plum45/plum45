@@ -12,7 +12,7 @@ function setupBot(token, config, options) {
     console.log("🤖 Bot created. Registering menus...");
 
     const mainMenu = Markup.keyboard([
-        ['⚡ Shortcuts', '📡 Status'],
+        ['⚡ Shortcuts', '📊 Status'],
         ['🛠️ Skills', '🧠 Who Am I?'],
         ['📅 Dashboard', '🆔 My ID']
     ]).resize();
@@ -25,8 +25,8 @@ function setupBot(token, config, options) {
         ctx.reply(`📖 **คู่มือการใช้งาน Stacy (เลขาอัจฉริยะ)**\n\n1. **การสั่งงาน:** พิมพ์คุยปกติได้เลยจ๊ะ\n2. **นัดหมาย:** บันทึกปุ๊บ จะเด้งไปที่ Google Calendar ทันทีค่ะ!\n3. **สกิลพิเศษ:** ใช้ Code Architect เพื่อสร้างระบบใหม่ๆ ให้หนูได้นะคะ`);
     });
 
-    bot.hears('📡 Status', (ctx) => {
-        ctx.reply(`📡 **Stacy System Status**\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🚀 **Engine:** ${config.MODEL}\n✨ **Version:** ${config.VERSION}\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
+    bot.hears('📊 Status', (ctx) => {
+        ctx.reply(`📡 **Stacy System Status** (Type /status for detail)\n━━━━━━━━━━━━━━━━━━━━\n🟢 **Backend:** Online\n🚀 **Engine:** ${config.MODEL}\n✨ **Version:** ${config.VERSION}\n━━━━━━━━━━━━━━━━━━━━`, Markup.inlineKeyboard([
             [Markup.button.callback('🔄 Refresh Status', 'refresh_status')],
             [Markup.button.callback('🖥️ PC Stats', 'pc_stats'), Markup.button.callback('📸 Screen Capture', 'screen_capture')]
         ]));
@@ -68,8 +68,13 @@ function setupBot(token, config, options) {
 
     bot.hears('📅 Dashboard', (ctx) => {
         ctx.reply(`🌐 **เข้าสู่หน้า Dashboard**`, Markup.inlineKeyboard([
-            [Markup.button.url('Open Dashboard', 'https://stacy-ai.vercel.app')]
+            [Markup.button.url('Open Dashboard', 'https://plum45.onrender.com')]
         ]));
+    });
+
+    bot.catch((err, ctx) => {
+        console.error(`🚨 [Telegraf Error] for ${ctx.updateType}:`, err);
+        ctx.reply(`🙏 **ขออภัยค่ะเจ้านาย บอทสดุดนิดหน่อยแต่ยังสู้อยู่นะคะ!**\nError: ${err.message.substring(0, 50)}`).catch(() => {});
     });
 
     return bot;
