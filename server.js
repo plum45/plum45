@@ -148,20 +148,21 @@ console.log(`📡 Telegram Token: ${TELEGRAM_TOKEN ? TELEGRAM_TOKEN.substring(0,
 
 const bot = setupBot(TELEGRAM_TOKEN, CONFIG, { db, firebaseStatus, docDir, IS_RENDER });
 
-// === EXPRESS INITIALIZATION (v5.0.0) ===
+// === EXPRESS INITIALIZATION (v5.0.1) ===
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, 'public')));
 
-// 📡 TOP-PRIORITY DIAGNOSTIC ROUTES
-app.get('/', (req, res) => res.json({ status: "STACY_LIVE", mode: IS_RENDER ? "CLOUD" : "LOCAL", version: "5.0.0", time: new Date().toISOString() }));
+// 📡 TOP-PRIORITY DIAGNOSTIC ROUTES (Above static middleware)
+app.get('/', (req, res) => res.json({ status: "STACY_LIVE", mode: IS_RENDER ? "CLOUD" : "LOCAL", version: "5.0.1", time: new Date().toISOString() }));
 app.get('/ping', (req, res) => res.send('PONG_V5'));
 app.get('/logs', (req, res) => {
     res.setHeader('Content-Type', 'text/plain; charset=utf-8');
     const logs = (logBuffer && logBuffer.length > 0) ? logBuffer.join('\n') : "--- No logs captured yet ---";
-    res.send(`--- STACY AI DIAGNOSIS LOGS (v5.0.0) ---\nServer: ${IS_RENDER ? 'RENDER' : 'PC'}\nTime: ${new Date().toLocaleString()}\n\n` + logs);
+    res.send(`--- STACY AI DIAGNOSIS LOGS (v5.0.1) ---\nServer: ${IS_RENDER ? 'RENDER' : 'PC'}\nTime: ${new Date().toLocaleString()}\n\n` + logs);
 });
+
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Store conversation history
 const tgContexts = new Map();
@@ -175,7 +176,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
     const HARDCODED_DATE_CONTEXT = `[📅 TODAY: ${todayISO} | ${fullContextTime} | ปี พ.ศ.2569 (ค.ศ.2026) | Bangkok GMT+7]`;
     
     if (!tgContexts.has(userId)) {
-        tgContexts.get(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
+        tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
     }
     const userStore = tgContexts.get(userId);
 
