@@ -206,9 +206,9 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             isFastPath = true;
         } else if (userStore.thinkingMode === false || (userMsg.length < 80)) {
             // Very Fast Path for simple chat — but STILL include basic tool context
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายของคุณ Snow ตอบสั้นๆ [🕒 ${fullContextTime}]
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายชื่อ Snow ⚠️ ตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ [🕒 ${fullContextTime}]
 หนูมีเครื่องมือ: [ACTION: ADD_CALENDAR_EVENT {...}], [ACTION: WORK_LOG {...}], [ACTION: REMINDER {...}], [ACTION: SCHEDULE_TASK {...}], [ACTION: WEB_SEARCH {...}], [ACTION: NEWS_SEARCH {...}], [ACTION: GET_PC_STATS {}]
-ถ้าเจ้านายขอให้ทำอะไร ให้ใช้ ACTION ที่เหมาะสม ถ้าแค่คุยก็ตอบสั้นๆ`;
+ถ้าเจ้านายขอให้ทำอะไร ให้ใช้ ACTION ที่เหมาะสม ถ้าแค่คุยก็ตอบสั้นๆ เป็นภาษาไทย`;
         } else {
             // Modular Smart Mode (OpenClaw Architecture)
             PROMPT_SOUL = loadPrompt('SOUL.md') || PROMPT_SOUL;
@@ -240,7 +240,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
-                    { role: 'system', content: "CRITICAL: You ARE Stacy. Always prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks (like gold prices or Julie) unless they are in the user's LATEST message." },
+                    { role: 'system', content: "CRITICAL: You ARE Stacy. ⚠️ ตอบเป็นภาษาไทยเสมอ ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด Always respond in Thai language only. Prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks unless they are in the user's LATEST message." },
                     { role: 'system', content: systemPrompt },
                     ...cleanHistory,
                     { role: 'user', content: finalInput }
