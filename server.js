@@ -213,7 +213,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             isFastPath = true;
         } else if (userStore.thinkingMode === false || (userMsg.length < 80)) {
             // Very Fast Path for simple chat — but STILL include basic tool context
-            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายชื่อ Snow ⚠️ ตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษ [🕒 ${fullContextTime}]
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายชื่อ Snow ⚠️ ตอบเป็นภาษาไทยเท่านั้น ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด [🕒 ${fullContextTime}]
 หนูมีเครื่องมือ: [ACTION: ADD_CALENDAR_EVENT {...}], [ACTION: WORK_LOG {...}], [ACTION: REMINDER {...}], [ACTION: SCHEDULE_TASK {...}], [ACTION: WEB_SEARCH {...}], [ACTION: NEWS_SEARCH {...}], [ACTION: GET_PC_STATS {}]
 ถ้าเจ้านายขอให้ทำอะไร ให้ใช้ ACTION ที่เหมาะสม ถ้าแค่คุยก็ตอบสั้นๆ เป็นภาษาไทย`;
         } else {
@@ -247,12 +247,12 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
-                    { role: 'system', content: `CRITICAL: You ARE Stacy. ⚠️ ตอบเป็นภาษาไทยเสมอ ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด Always respond in Thai language only. Prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks unless they are in the user's LATEST message. ${HARDCODED_DATE_CONTEXT}` },
+                    { role: 'system', content: `CRITICAL: You ARE Stacy. ⚠️ ตอบเป็นภาษาไทยเสมอ ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด ห้ามแทนตัวเองว่าเป็น AI หรือ Model ให้แทนตัวเองว่า "หนู" และเรียกเจ้านายว่า "เจ้านาย" หรือ "คุณ Snow" เสมอ แม้จะเป็นการปฏิเสธ (เพราะความโปร่งใสหรือความปลอดภัย) ก็ต้องพูดในบุคลิกของ Stacy เท่านั้น Always respond in Thai language only. Prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks unless they are in the user's LATEST message. ${HARDCODED_DATE_CONTEXT}` },
                     { role: 'system', content: systemPrompt + '\n' + HARDCODED_DATE_CONTEXT },
                     ...cleanHistory,
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 0.3,
+                temperature: 0.5,
                 max_tokens: 8192,
                 top_p: 0.9,
                 frequency_penalty: 0.3,
@@ -339,7 +339,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
         }
     } catch (e) {
         console.error('AI Error:', e.message);
-        ctx.reply(`🙏 ขออภัยค่ะเจ้านาย ระบบ AI ขัดข้องชั่วคราว\nError: ${(e.message || 'Unknown').substring(0, 100)}`);
+        ctx.reply(`🙏 ขออภัยค่ะเจ้านาย บอทสะดุดนิดหน่อยแต่ยังสู้อยู่นะคะ!\nError: ${(e.message || 'Unknown').substring(0, 100)}`);
     }
 }
 
