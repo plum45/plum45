@@ -298,7 +298,17 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             
             if (statusMsg) ctx.telegram.deleteMessage(ctx.chat.id, statusMsg.message_id).catch(() => {});
             
-            await smartReply(ctx, cleanText || "หนูกำลังประมวลผลข้อมูลอยู่ค่ะเจ้านาย...");
+            // Suppress garbled model text for search/news actions — let the tool output speak
+            const SEARCH_ACTIONS = ['WEB_SEARCH', 'GOOGLE_SEARCH', 'NEWS_SEARCH', 'NEWS', 'GET_NEWS', 'IMAGE_SEARCH'];
+            const hasSearchAction = actions.some(a => SEARCH_ACTIONS.includes(a.type));
+            
+            if (hasSearchAction) {
+                // Only send a brief status, the search tool will provide the real results
+                const briefText = cleanText && cleanText.length > 5 && cleanText.length < 200 ? cleanText : "🔍 กำลังค้นหาให้ค่ะเจ้านาย...";
+                await smartReply(ctx, briefText, 15000); // Auto-delete after 15s
+            } else {
+                await smartReply(ctx, cleanText || "หนูกำลังประมวลผลข้อมูลอยู่ค่ะเจ้านาย...");
+            }
             
             if (actions.length > 0) {
                 for (const action of actions) {
