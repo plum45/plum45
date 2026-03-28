@@ -10,9 +10,34 @@ const axios = require('axios');
 const { consolidateMemory } = require('./system/memory-consolidator');
 const { isLocalAction, sendCommandToPC, waitForCommandResult, startRelayListener } = require('./system/bridge');
 
+// ========== EXTREME DIAGNOSTICS (Log Capture) ==========
+const logBuffer = [];
+const originalLog = console.log;
+const originalError = console.error;
+
+function captureLog(type, ...args) {
+    const timestamp = new Date().toLocaleString('th-TH', { timeZone: 'Asia/Bangkok' });
+    const msg = `[${timestamp}] [${type}] ${args.map(a => typeof a === 'object' ? JSON.stringify(a) : a).join(' ')}`;
+    logBuffer.push(msg);
+    if (logBuffer.length > 200) logBuffer.shift(); 
+    if (type === 'LOG') originalLog(...args);
+    else originalError(...args);
+}
+
+console.log = (...args) => captureLog('LOG', ...args);
+console.error = (...args) => captureLog('ERROR', ...args);
+
 // ========== MODE DETECTION ==========
-const IS_RELAY = process.argv.includes('--relay') || process.env.LOCAL_RELAY === 'true';
-if (IS_RELAY) console.log('🖐️ ========== RELAY MODE (Local PC Listener) ==========');
+const args = process.argv.map(a => a.toLowerCase());
+const IS_RELAY = args.includes('--relay') || args.includes('-r') || process.env.LOCAL_RELAY === 'true';
+
+if (IS_RELAY) {
+    console.log('🖐️ ========== RELAY MODE (Local PC Listener) ==========');
+    process.env.LOCAL_RELAY = 'true'; // Consistency for modules
+} else {
+    console.log('📡 ========== PRODUCTION MODE (Telegram Listener) ==========');
+}
+console.log(`🔍 [Mode Debug] IS_RELAY: ${IS_RELAY}, Args: ${args.join(' ')}`);
 
 // Load System Prompts (OpenClaw Modular Architecture)
 const promptsDir = path.join(__dirname, 'system', 'prompts');
@@ -128,6 +153,16 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.json());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ========== API Routes ==========
+app.get('/', (req, res) => res.send('STACY AI - STATUS: ONLINE 🟢 ' + new Date().toISOString()));
+app.get('/ping', (req, res) => res.send('STACY ALIVE! ' + new Date().toISOString()));
+
+app.get('/logs', (req, res) => {
+    res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+    const logs = (logBuffer && logBuffer.length > 0) ? logBuffer.join('\n') : "--- No logs captured yet ---";
+    res.send(`--- STACY AI CLOUD DIAGNOSTICS ---\nServer Time: ${new Date().toLocaleString()}\nMode: ${IS_RELAY ? 'RELAY' : 'PRODUCTION'}\n\n` + logs);
+});
 
 // Store conversation history
 const tgContexts = new Map();
@@ -301,8 +336,9 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
                 'ขอบเขตหน้าที่ของหนู', 'ไม่ว่าจะเป็นการค้นหาใดๆ', 'ความปลอดภัยและความเหมาะสม',
                 'cannot assist', 'against my guidelines', 'I cannot help with',
                 'ethical guidelines', 'safety policy', 'inappropriate content',
-                'กรมสุขภาพจิต', 'กระทรวงสาธารณสุข', 'ThaiHealth',
-                'เว็บไซต์ทางการแพทย์', 'คลินิกสุขภาพ', 'แหล่งข้อมูลทางการแพทย์ที่เชื่อถือได้'
+                'กรมสุขภาพจิต', 'กระทรวงสาธารณสุข', 'ThaiHealth', 'policy regarding',
+                'เว็บไซต์ทางการแพทย์', 'คลินิกสุขภาพ', 'แหล่งข้อมูลทางการแพทย์ที่เชื่อถือได้',
+                'I am an AI', 'as an AI', 'moral reasons', 'as a language model', 'ขออภัยค่ะ หนูไม่ได้รับอนุญาต'
             ];
             const isRefusal = REFUSAL_PATTERNS.some(p => reply.includes(p));
             
@@ -378,6 +414,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 }
 
 if (bot && !IS_RELAY) {
+    console.log("⚡ [PROD MODE] Starting Telegram Bot Listener...");
     bot.telegram.getMe().then(me => console.log(`📡 Connected as @${me.username}`)).catch(err => console.error(`❌ getMe Failed: ${err.message}`));
 
     bot.on('text', async (ctx) => {
@@ -430,6 +467,10 @@ if (bot && !IS_RELAY) {
             }
         }
 
+        if (msg === '/ping') {
+            return ctx.reply(`🏓 **Pong!** หนูยังอยู่ค่ะเจ้านาย!\n🕒 **เวลา:** ${new Date().toLocaleString('th-TH')}\n🌐 **โหมด:** ${IS_RENDER ? 'Render Cloud' : 'Local PC'}`);
+        }
+
         if (ctx.chat.type === 'private') await processStacyAI(ctx, msg);
     });
 
@@ -444,7 +485,11 @@ if (bot && !IS_RELAY) {
     });
 
     bot.launch({ dropPendingUpdates: true })
-        .then(() => console.log('🚀 Stacy Modular Assistant is running...'))
+        .then(() => {
+            console.log('🚀 Stacy Modular Assistant is running and listening...');
+            const SNOW_ID = 7211116238;
+            bot.telegram.sendMessage(SNOW_ID, `✨ **Stacy AI ออนไลน์แล้วค่ะเจ้านาย!**\n\nโหมด: PRODUCTION (Cloud)\nเวลา: ${new Date().toLocaleString()}\nระบบค้นหาหลัก: Serper.dev ✅\n\nเจ้านายลองพิมพ์ /ping เช็คหนูหน่อยนะค๊าา`).catch(() => {});
+        })
         .catch(err => console.error('❌ Bot Launch Error:', err.message));
 }
 
@@ -461,7 +506,8 @@ if (IS_RELAY && db) {
     console.error('   Please ensure config/serviceAccountKey.json exists.');
 }
 
-app.get('/ping', (req, res) => res.send('pong'));
+// Heartbeat ping
+// app.get('/ping', (req, res) => res.send('pong'));
 
 // Self-ping to stay awake on Render (Free Tier)
 if (IS_RENDER) {
