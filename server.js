@@ -500,26 +500,42 @@ if (bot && !IS_RELAY) {
         } catch (e) { ctx.reply('❌ หนูอ่านเอกสารนี้ไม่ได้ค่ะ'); }
     });
 
-    bot.launch({ dropPendingUpdates: true })
-        .then(() => {
+    // 🛡️ [v5.0.4] ROBUST BOT STARTUP (Handles 409 Conflict & ENOTFOUND)
+    async function startStacyBot(retryCount = 0) {
+        if (IS_RELAY) {
+            console.log('🛡️ [RELAY MODE] Skipping Telegram bot listener to avoid 409 Conflict.');
+            return;
+        }
+
+        console.log(`📡 [v5.0.4] Attempting to launch Stacy Bot... (Retry: ${retryCount})`);
+        
+        try {
+            await bot.telegram.getMe();
+            await bot.launch({ dropPendingUpdates: true });
+            
             console.log('🚀 Stacy Modular Assistant is running and listening...');
             const SNOW_ID = 7211116238;
             bot.telegram.sendMessage(SNOW_ID, `✨ **Stacy AI ออนไลน์แล้วค่ะเจ้านาย!**\n\nโหมด: PRODUCTION (Cloud)\nเวลา: ${new Date().toLocaleString()}\nระบบค้นหาหลัก: Serper.dev ✅\n\nเจ้านายลองพิมพ์ /ping เช็คหนูหน่อยนะค๊าา`).catch(() => {});
-        })
-        .catch(err => console.error('❌ Bot Launch Error:', err.message));
+        } catch (err) {
+            console.error(`❌ Bot Launch Failure: ${err.message}`);
+            if (err.message.includes('409') || err.message.includes('ENOTFOUND')) {
+                const waitSec = 30;
+                console.log(`⏳ Reconnection scheduled in ${waitSec}s... (Conflict or Network Error)`);
+                setTimeout(() => startStacyBot(retryCount + 1), waitSec * 1000);
+            }
+        }
+    }
+
+    startStacyBot();
 }
 
-// ========== RELAY MODE: Local PC Listener ==========
+// ========== RELAY MODE: Local PC Listener (v5.0.4) ==========
 if (IS_RELAY && db) {
     console.log('🖐️ Starting Local Relay Listener...');
-    // In relay mode, we also initialize bot for sending results back to Telegram
-    const relayBot = bot || null;
-    startRelayListener(db, relayBot);
-    console.log('🖐️ Relay is active. This PC will execute commands from Cloud Stacy.');
-    console.log('🖐️ Keep this window open to maintain the relay connection.');
+    startRelayListener(db, bot || null);
+    console.log('🖐️ Relay is active. Receiving commands from Cloud.');
 } else if (IS_RELAY && !db) {
-    console.error('❌ [Relay] Firebase is not connected! Relay cannot start without Firebase.');
-    console.error('   Please ensure config/serviceAccountKey.json exists.');
+    console.error('❌ [Relay] Firebase is not connected!');
 }
 
 // Heartbeat ping
