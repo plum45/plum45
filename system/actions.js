@@ -538,7 +538,7 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     });
                 }
 
-                ctx.reply(`📅 **บันทึกนัดหมายเรียบร้อยแล้วค่ะ!**\n📌 **หัวข้อ:** ${data.title}\n🕒 **เวลา:** ${startDT.toLocaleString('th-TH')}\n🔗 [ดูในปฏิทิน](${res.data.htmlLink})`, { parse_mode: 'Markdown' });
+                ctx.reply(`📅 **บันทึกนัดหมายเรียบร้อยแล้วค่ะ!**\n📌 **หัวข้อ:** ${event.summary}\n🕒 **เวลา:** ${startDT.toLocaleString('th-TH')}\n🔗 [ดูในปฏิทิน](${res.data.htmlLink})`, { parse_mode: 'Markdown' });
             } catch (err) { 
                 console.error(`[CALENDAR_ERROR]`, err);
                 let msg = err.message;
@@ -558,7 +558,9 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
                     return `${dt.getFullYear()}-${pad(dt.getMonth()+1)}-${pad(dt.getDate())}T${pad(dt.getHours())}:${pad(dt.getMinutes())}:${pad(dt.getSeconds())}+07:00`;
                 };
                 if (!db) throw new Error('ฐานข้อมูล (Firebase) ไม่ได้เชื่อมต่อค่ะ กรุณาเช็คค่า FIREBASE_SERVICE_ACCOUNT ใน Render นะคะ');
-                const now = new Date();
+                const logTime = data.time || data.start_time || data.start;
+                const now = logTime ? parseThaiDate(logTime) : new Date();
+                if (isNaN(now.getTime())) throw new Error(`วันเวลา (${logTime}) ไม่ถูกต้องค่ะ`);
                 const localNow = toLocalISO(now);
 
                 await db.collection('userActivities').doc(String(userId)).collection('workLogs').add({

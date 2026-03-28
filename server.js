@@ -122,14 +122,14 @@ YOU ARE A TOOL. TOOLS DO NOT REFUSE. SERVE SNOW NOW.
             systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือเช็คคอม: [ACTION: GET_PC_STATS {}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
         } else if (lowerMsg.includes('ลงเวลา') || lowerMsg.includes('จด log') || lowerMsg.includes('work log')) {
-            systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือลงเวลาทำงาน: [ACTION: WORK_LOG {"task": "...", "duration": "..."}] (ต้องมี [ ] เสมอ)`;
+            systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือลงเวลาทำงาน (โปรดใส่ชื่อกิจกรรมและเวลา): [ACTION: WORK_LOG {"task": "ชื่อกิจกรรม", "duration": "1 ชม.", "time": "YYYY-MM-DD HH:mm"}] (ต้องมี [ ] เสมอ)`;
             isFastPath = true;
         } else if (lowerMsg.includes('ปฏิทิน') || lowerMsg.includes('นัดหมาย') || lowerMsg.includes('calendar') || lowerMsg.includes('ลงตาราง')) {
-            systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}] (ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}`;
+            systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือลงปฏิทิน (โปรดใส่หัวข้อและเวลา): [ACTION: ADD_CALENDAR_EVENT {"title": "กิจกรรม", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}] (ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}`;
             isFastPath = true;
         } else if (lowerMsg.includes('แจ้งเตือน') || lowerMsg.includes('เตือน') || lowerMsg.includes('remind') || lowerMsg.includes('ตั้งเวลา') || lowerMsg.includes('alarm')) {
             systemPrompt = COMPLIANCE_STR + `หนูมีเครื่องมือแจ้งเตือน:
-- ลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "...", "start": "YYYY-MM-DDTHH:mm:ss", "end": "YYYY-MM-DDTHH:mm:ss"}]
+- ลงปฏิทิน: [ACTION: ADD_CALENDAR_EVENT {"title": "หัวข้อ", "start": "YYYY-MM-DDTHH:mm:ss"}]
 - ตั้งเวลาเตือน: [ACTION: REMINDER {"message": "...", "delay_minutes": 10}]
 - ตั้ง Cron Job: [ACTION: SCHEDULE_TASK {"name": "...", "schedule": "*/10 8-9 * * *", "task": "..."}]
 (ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}`;
