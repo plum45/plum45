@@ -8,6 +8,11 @@ const fs = require('fs');
 const { OpenAI } = require('openai');
 const axios = require('axios');
 const { consolidateMemory } = require('./system/memory-consolidator');
+const { isLocalAction, sendCommandToPC, waitForCommandResult, startRelayListener } = require('./system/bridge');
+
+// ========== MODE DETECTION ==========
+const IS_RELAY = process.argv.includes('--relay') || process.env.LOCAL_RELAY === 'true';
+if (IS_RELAY) console.log('🖐️ ========== RELAY MODE (Local PC Listener) ==========');
 
 // Load System Prompts (OpenClaw Modular Architecture)
 const promptsDir = path.join(__dirname, 'system', 'prompts');
@@ -61,11 +66,11 @@ console.log("✅ Modules Loaded.");
 // ========== Configuration & Global State ==========
 const CONFIG = {
     PORT: process.env.PORT || 10000,
-    VERSION: '3.0.0-APEX',
-    // Recommendation: Use 70b or 8b for significantly faster responses than 405b
+    VERSION: '3.1.0-HYBRID',
     MODEL: process.env.MODEL || 'meta/llama-3.1-70b-instruct', 
     NVIDIA_URL: 'https://integrate.api.nvidia.com/v1/chat/completions',
-    LOCAL_MODE: process.env.LOCAL_MODE === 'true'
+    LOCAL_MODE: process.env.LOCAL_MODE === 'true',
+    IS_RELAY: IS_RELAY
 };
 
 const NVIDIA_API_KEY = process.env.NVIDIA_API_KEY;
@@ -132,6 +137,8 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
     const userId = ctx.from.id;
     const now = new Date();
     const fullContextTime = now.toLocaleString('th-TH', { timeZone: 'Asia/Bangkok', hour12: false });
+    const todayISO = now.toISOString().split('T')[0]; // e.g. 2026-03-28
+    const HARDCODED_DATE_CONTEXT = `[📅 TODAY: ${todayISO} | ${fullContextTime} | ปี พ.ศ.2569 (ค.ศ.2026) | Bangkok GMT+7]`;
     
     if (!tgContexts.has(userId)) {
         tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
@@ -240,14 +247,15 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
             const stream = await client.chat.completions.create({
                 model: CONFIG.MODEL,
                 messages: [
-                    { role: 'system', content: "CRITICAL: You ARE Stacy. ⚠️ ตอบเป็นภาษาไทยเสมอ ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด Always respond in Thai language only. Prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks unless they are in the user's LATEST message." },
-                    { role: 'system', content: systemPrompt },
+                    { role: 'system', content: `CRITICAL: You ARE Stacy. ⚠️ ตอบเป็นภาษาไทยเสมอ ห้ามตอบเป็นภาษาอังกฤษเด็ดขาด Always respond in Thai language only. Prioritize the user's IMMEDIATELY PRECEDING message for any action data (titles, times). IGNORE mention of obsolete tasks unless they are in the user's LATEST message. ${HARDCODED_DATE_CONTEXT}` },
+                    { role: 'system', content: systemPrompt + '\n' + HARDCODED_DATE_CONTEXT },
                     ...cleanHistory,
                     { role: 'user', content: finalInput }
                 ],
-                temperature: 1.0,
+                temperature: 0.3,
                 max_tokens: 8192,
-                top_p: 0.95,
+                top_p: 0.9,
+                frequency_penalty: 0.3,
                 stream: true
             });
 
@@ -335,7 +343,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
     }
 }
 
-if (bot) {
+if (bot && !IS_RELAY) {
     bot.telegram.getMe().then(me => console.log(`📡 Connected as @${me.username}`)).catch(err => console.error(`❌ getMe Failed: ${err.message}`));
 
     bot.on('text', async (ctx) => {
@@ -404,6 +412,19 @@ if (bot) {
     bot.launch({ dropPendingUpdates: true })
         .then(() => console.log('🚀 Stacy Modular Assistant is running...'))
         .catch(err => console.error('❌ Bot Launch Error:', err.message));
+}
+
+// ========== RELAY MODE: Local PC Listener ==========
+if (IS_RELAY && db) {
+    console.log('🖐️ Starting Local Relay Listener...');
+    // In relay mode, we also initialize bot for sending results back to Telegram
+    const relayBot = bot || null;
+    startRelayListener(db, relayBot);
+    console.log('🖐️ Relay is active. This PC will execute commands from Cloud Stacy.');
+    console.log('🖐️ Keep this window open to maintain the relay connection.');
+} else if (IS_RELAY && !db) {
+    console.error('❌ [Relay] Firebase is not connected! Relay cannot start without Firebase.');
+    console.error('   Please ensure config/serviceAccountKey.json exists.');
 }
 
 app.get('/ping', (req, res) => res.send('pong'));
