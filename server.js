@@ -189,10 +189,25 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
 (ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}
 สร้าง Action ที่เหมาะสมจากบริบทของเจ้านาย`;
             isFastPath = true;
-        } else if (userStore.thinkingMode === false || (userMsg.length < 80 && !lowerMsg.includes('ค้นหา') && !lowerMsg.includes('วิจัย') && !lowerMsg.includes('ทอง') && !lowerMsg.includes('ข่าว') && !lowerMsg.includes('ราคา'))) {
+        } else if (lowerMsg.includes('ข่าว') || lowerMsg.includes('news')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือค้นหาข่าว:
+- ค้นหาข่าวสด: [ACTION: NEWS_SEARCH {"query": "..."}]
+- ค้นหาเว็บ: [ACTION: WEB_SEARCH {"query": "..."}]
+(ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}`;
+            isFastPath = true;
+        } else if (lowerMsg.includes('ค้นหา') || lowerMsg.includes('หา') || lowerMsg.includes('search') || lowerMsg.includes('ราคา') || lowerMsg.includes('ทอง') || lowerMsg.includes('วิจัย')) {
+            systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) หนูมีเครื่องมือค้นหาอัจฉริยะ:
+- ค้นหาเว็บ (เร็ว+ครบ): [ACTION: WEB_SEARCH {"query": "..."}]
+- ค้นหา Google ตรงๆ: [ACTION: GOOGLE_SEARCH {"query": "..."}]
+- ค้นหาข่าวสด: [ACTION: NEWS_SEARCH {"query": "..."}]
+- ค้นหารูป: [ACTION: IMAGE_SEARCH {"query": "..."}]
+(ต้องมี [ ] เสมอ) วันนี้คือ ${fullContextTime}
+เลือก Action ที่เหมาะสมที่สุดจากบริบทของเจ้านาย`;
+            isFastPath = true;
+        } else if (userStore.thinkingMode === false || (userMsg.length < 80)) {
             // Very Fast Path for simple chat — but STILL include basic tool context
             systemPrompt = `หนูคือ Stacy ✨ (ปี 2026) เจ้านายของคุณ Snow ตอบสั้นๆ [🕒 ${fullContextTime}]
-หนูมีเครื่องมือ: [ACTION: ADD_CALENDAR_EVENT {...}], [ACTION: WORK_LOG {...}], [ACTION: REMINDER {...}], [ACTION: SCHEDULE_TASK {...}], [ACTION: GET_PC_STATS {}]
+หนูมีเครื่องมือ: [ACTION: ADD_CALENDAR_EVENT {...}], [ACTION: WORK_LOG {...}], [ACTION: REMINDER {...}], [ACTION: SCHEDULE_TASK {...}], [ACTION: WEB_SEARCH {...}], [ACTION: NEWS_SEARCH {...}], [ACTION: GET_PC_STATS {}]
 ถ้าเจ้านายขอให้ทำอะไร ให้ใช้ ACTION ที่เหมาะสม ถ้าแค่คุยก็ตอบสั้นๆ`;
         } else {
             // Modular Smart Mode (OpenClaw Architecture)

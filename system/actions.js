@@ -14,7 +14,7 @@ const wol = require('wake_on_lan');
 const PptxGenJS = require('pptxgenjs');
 
 // Destructure utils
-const { performSearch, handleImageSearch, logToTerminal, smartReply, sendSmartImage } = require('./utils');
+const { performSearch, googleSearch, smartSearch, newsSearch, handleImageSearch, logToTerminal, smartReply, sendSmartImage } = require('./utils');
 const { handleSubagent } = require('./subagent');
 const { scheduleTask } = require('./cron-manager');
 const { executeCommand } = require('./shell-executor');
@@ -317,17 +317,32 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
             break;
 
         case 'WEB_SEARCH':
+            try {
+                const query = data.query || data.q || data.text || (typeof data === 'string' ? data : null);
+                if (!query) throw new Error('คำค้นหาว่างเปล่า');
+                const results = await smartSearch(query);
+                await smartReply(ctx, results);
+            } catch (err) { await ctx.reply(`❌ ค้นหาล้มเหลว: ${err.message}`); }
+            break;
+
         case 'GOOGLE_SEARCH':
             try {
                 const query = data.query || data.q || data.text || (typeof data === 'string' ? data : null);
                 if (!query) throw new Error('คำค้นหาว่างเปล่า');
-                
-                // If the user explicitly asked for GOOGLE_SEARCH or if WEB_SEARCH fails
-                const { googleSearch } = require('./utils');
-                const results = (type === 'GOOGLE_SEARCH') ? await googleSearch(query) : await performSearch(query);
-                
-                await smartReply(ctx, `🔍 **ผลการค้นหา (${type === 'GOOGLE_SEARCH' ? 'Google' : 'Tavily'}):**\n\n${results}`);
+                const { googleSearch: gSearch } = require('./utils');
+                const results = await gSearch(query);
+                await smartReply(ctx, `🔍 **ผลการค้นหา (Google):**\n\n${results}`);
             } catch (err) { await ctx.reply(`❌ ค้นหาล้มเหลว: ${err.message}`); }
+            break;
+
+        case 'NEWS_SEARCH':
+        case 'NEWS':
+        case 'GET_NEWS':
+            try {
+                const query = data.query || data.q || data.topic || (typeof data === 'string' ? data : 'ข่าวประเทศไทยวันนี้');
+                const results = await newsSearch(query);
+                await smartReply(ctx, results);
+            } catch (err) { await ctx.reply(`❌ ค้นหาข่าวล้มเหลว: ${err.message}`); }
             break;
 
         case 'IMAGE_SEARCH':

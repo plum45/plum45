@@ -171,4 +171,95 @@ async function sendSmartImage(ctx, imgPath, caption) {
     }
 }
 
-module.exports = { performSearch, googleSearch, handleImageSearch, logToTerminal, smartReply, sendSmartImage };
+// ========== SEARCH v2: Parallel Dual-Engine ==========
+
+async function smartSearch(query) {
+    let q = typeof query === 'string' ? query : (query?.query || query?.q || "");
+    if (!q || String(q).trim() === "") return "ไม่พบข้อมูลเนื่องจากคำค้นหาว่างเปล่าค่ะ";
+
+    const searchYear = " วันนี้ ล่าสุด ปี พ.ศ. 2569 (2026) ในประเทศไทย";
+    const finalQuery = String(q).includes("256") || String(q).includes("202") ? String(q) : String(q) + searchYear;
+    console.log(`🔍 [SmartSearch v2] Dual-engine query: ${finalQuery}`);
+
+    // Fire both engines in parallel
+    const [serperResult, tavilyResult] = await Promise.allSettled([
+        googleSearch(q),
+        performSearch(q)
+    ]);
+
+    const serperOk = serperResult.status === 'fulfilled' && serperResult.value && !serperResult.value.startsWith('เกิดข้อผิดพลาด');
+    const tavilyOk = tavilyResult.status === 'fulfilled' && tavilyResult.value && !tavilyResult.value.startsWith('เกิดข้อผิดพลาด');
+
+    if (!serperOk && !tavilyOk) {
+        return "❌ ค้นหาไม่สำเร็จจากทั้ง 2 ระบบค่ะ กรุณาลองใหม่อีกครั้งค่ะเจ้านาย";
+    }
+
+    let output = `🔍 **ผลการค้นหา Smart Search v2:**\n\n`;
+
+    // Tavily AI answer first (if available) — it's the best summary
+    if (tavilyOk) {
+        const tavilyText = tavilyResult.value;
+        const aiMatch = tavilyText.match(/💡 \*\*AI Analyst:\*\*\n([\s\S]*?)(?=\n🔎|\n$|$)/);
+        if (aiMatch) {
+            output += `💡 **สรุปอัตโนมัติ (AI):**\n${aiMatch[1].trim()}\n\n`;
+        }
+    }
+
+    // Serper direct answer & knowledge graph
+    if (serperOk) {
+        output += serperResult.value;
+    }
+
+    // Tavily sources (if Serper didn't provide enough)
+    if (tavilyOk && !serperOk) {
+        output += tavilyResult.value;
+    }
+
+    output += `\n\n📊 _ค้นหาโดย: ${serperOk ? 'Google' : ''}${serperOk && tavilyOk ? ' + ' : ''}${tavilyOk ? 'Tavily AI' : ''}_`;
+    return output;
+}
+
+async function newsSearch(query) {
+    try {
+        let q = typeof query === 'string' ? query : (query?.query || query?.q || "");
+        if (!q || String(q).trim() === "") return "ไม่พบข้อมูลเนื่องจากคำค้นหาว่างเปล่าค่ะ";
+
+        const searchYear = " 2026 ล่าสุด";
+        const finalQuery = String(q).includes("256") || String(q).includes("202") ? String(q) : String(q) + searchYear;
+        console.log(`📰 [NewsSearch] Query: ${finalQuery}`);
+
+        const serperApiKey = process.env.SERPER_API_KEY || '5d4ed8c8b92c3b8d7bf424e2137041ce1073b916';
+        const response = await axios.post('https://google.serper.dev/news', {
+            q: finalQuery,
+            gl: 'th',
+            hl: 'th',
+            num: 8
+        }, {
+            headers: { 'X-API-KEY': serperApiKey, 'Content-Type': 'application/json' },
+            timeout: 15000
+        });
+
+        const data = response.data;
+        if (!data.news || data.news.length === 0) {
+            // Fallback to normal search
+            return await smartSearch(q);
+        }
+
+        let output = `📰 **ข่าวล่าสุด (Google News ${new Date().toLocaleDateString('th-TH')}):**\n\n`;
+        data.news.slice(0, 6).forEach((item, i) => {
+            const timeAgo = item.date || '';
+            output += `**${i + 1}.** ${item.title}\n`;
+            output += `   📰 ${item.source} • ${timeAgo}\n`;
+            output += `   🔗 ${item.link}\n`;
+            if (item.snippet) output += `   📝 ${item.snippet}\n`;
+            output += `\n`;
+        });
+
+        return output;
+    } catch (e) {
+        console.error('NewsSearch Error:', e.message);
+        return await smartSearch(query);
+    }
+}
+
+module.exports = { performSearch, googleSearch, smartSearch, newsSearch, handleImageSearch, logToTerminal, smartReply, sendSmartImage };
