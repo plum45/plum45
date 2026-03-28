@@ -25,7 +25,8 @@ const LOCAL_ONLY_ACTIONS = [
     'YOUTUBE_CONTROL',
     'YOUTUBE_LIST_TABS',
     'BROWSER_INTERACT',
-    'CANVA_CONTROL'
+    'CANVA_CONTROL',
+    'RECOVER_WIFI'
 ];
 
 /**
@@ -37,38 +38,39 @@ function isLocalAction(actionType) {
 
 /**
  * CLOUD SIDE: Send a command to the local PC via Firestore
+ * @param {FirebaseFirestore.Firestore} db - Firestore instance
+ * @param {string} userId - Telegram user ID
+ * @param {string} actionType - The action to execute
+ * @param {object} actionData - The action parameters
+ * @param {number} chatId - The Telegram chat ID for sending results back
+ * @returns {string} commandId
  */
 async function sendCommandToPC(db, userId, actionType, actionData, chatId) {
-    if (!db) throw new Error('Firebase ไม่ได้เชื่อมต่อค่ะ กรุณาเช็คค่า FIREBASE_SERVICE_ACCOUNT ใน Render นะคะ');
+    if (!db) throw new Error('Firebase ไม่ได้เชื่อมต่อค่ะ');
 
-    try {
-        const commandRef = await db.collection('pc_commands').add({
-            userId: String(userId),
-            chatId: chatId,
-            action: actionType,
-            data: actionData || {},
-            status: 'pending',
-            createdAt: admin.firestore.FieldValue.serverTimestamp(),
-            result: null,
-            error: null
-        });
+    const commandRef = await db.collection('pc_commands').add({
+        userId: String(userId),
+        chatId: chatId,
+        action: actionType,
+        data: actionData,
+        status: 'pending',
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        result: null,
+        error: null
+    });
 
-        console.log(`📡 [Bridge] Command queued for PC: ${actionType} (ID: ${commandRef.id})`);
-        return commandRef.id;
-    } catch (err) {
-        console.error('[Bridge] Error queuing command:', err.message);
-        throw err;
-    }
+    console.log(`📡 [Bridge] Command sent to PC: ${actionType} (ID: ${commandRef.id})`);
+    return commandRef.id;
 }
 
 /**
- * CLOUD SIDE: Wait for a command result (Optional, used if the Cloud bot needs the result to continue)
+ * CLOUD SIDE: Wait for a command result with timeout
  */
-async function waitForCommandResult(db, commandId, timeoutMs = 45000) {
+async function waitForCommandResult(db, commandId, timeoutMs = 30000) {
     return new Promise((resolve, reject) => {
         const timeout = setTimeout(() => {
             unsubscribe();
-            resolve({ status: 'timeout', result: 'คำสั่งหมดเวลาค่ะ (PC อาจจะไม่ได้เปิดอยู่)' });
+            resolve({ status: 'timeout', result: null });
         }, timeoutMs);
 
         const unsubscribe = db.collection('pc_commands').doc(commandId)
@@ -88,6 +90,8 @@ async function waitForCommandResult(db, commandId, timeoutMs = 45000) {
 
 /**
  * LOCAL PC SIDE: Start listening for commands from Cloud
+ * @param {FirebaseFirestore.Firestore} db - Firestore instance
+ * @param {object} bot - Telegraf bot instance (for sending results back via Telegram)
  */
 function startRelayListener(db, bot) {
     if (!db) {
@@ -96,56 +100,53 @@ function startRelayListener(db, bot) {
     }
 
     console.log('🖐️ [Relay] Local PC Relay is now LISTENING for commands...');
+    console.log('🖐️ [Relay] Waiting for commands from Cloud Stacy...');
 
-    // Subscribe to pending commands for any user
+    // Listen for pending commands
     db.collection('pc_commands')
         .where('status', '==', 'pending')
         .onSnapshot(async (snapshot) => {
             for (const change of snapshot.docChanges()) {
-                if (change.type === 'added') {
-                    const doc = change.doc;
-                    const cmd = doc.data();
-                    const commandId = doc.id;
+                if (change.type !== 'added') continue;
 
-                    console.log(`📥 [Relay] Received command: ${cmd.action} (ID: ${commandId})`);
+                const doc = change.doc;
+                const cmd = doc.data();
+                const commandId = doc.id;
 
-                    // Mark as 'running' immediately
-                    try {
-                        await doc.ref.update({ 
-                            status: 'running',
-                            startedAt: admin.firestore.FieldValue.serverTimestamp()
-                        });
+                console.log(`📥 [Relay] Received command: ${cmd.action} (ID: ${commandId})`);
 
-                        // Execute the corresponding local logic
-                        const result = await executeLocalCommand(cmd.action, cmd.data);
+                // Mark as 'running'
+                await doc.ref.update({ status: 'running' });
 
-                        // Update Firestore with result
-                        await doc.ref.update({
-                            status: 'completed',
-                            result: result,
-                            completedAt: admin.firestore.FieldValue.serverTimestamp()
-                        });
+                try {
+                    const result = await executeLocalCommand(cmd.action, cmd.data);
 
-                        // Send result back to Telegram if bot is available
-                        if (bot && cmd.chatId) {
-                            await sendResultToTelegram(bot, cmd.chatId, cmd.action, result);
-                        }
+                    // Update Firestore with result
+                    await doc.ref.update({
+                        status: 'completed',
+                        result: result,
+                        completedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
 
-                        console.log(`✅ [Relay] Command ${cmd.action} completed successfully.`);
+                    // Send result back to Telegram if bot is available
+                    if (bot && cmd.chatId) {
+                        await sendResultToTelegram(bot, cmd.chatId, cmd.action, result);
+                    }
 
-                    } catch (err) {
-                        console.error(`❌ [Relay] Command ${cmd.action} failed:`, err.message);
-                        await doc.ref.update({
-                            status: 'failed',
-                            error: err.message,
-                            completedAt: admin.firestore.FieldValue.serverTimestamp()
-                        });
+                    console.log(`✅ [Relay] Command ${cmd.action} completed successfully.`);
 
-                        if (bot && cmd.chatId) {
-                            try {
-                                await bot.telegram.sendMessage(cmd.chatId, `❌ คำสั่ง ${cmd.action} ล้มเหลว: ${err.message}`);
-                            } catch (e) {}
-                        }
+                } catch (err) {
+                    console.error(`❌ [Relay] Command ${cmd.action} failed:`, err.message);
+                    await doc.ref.update({
+                        status: 'failed',
+                        error: err.message,
+                        completedAt: admin.firestore.FieldValue.serverTimestamp()
+                    });
+
+                    if (bot && cmd.chatId) {
+                        try {
+                            await bot.telegram.sendMessage(cmd.chatId, `❌ คำสั่ง ${cmd.action} ล้มเหลว: ${err.message}`);
+                        } catch (e) {}
                     }
                 }
             }
@@ -253,6 +254,48 @@ async function executeLocalCommand(actionType, data) {
                 return { type: 'text', text: `🎨 **Canva:** ${result || 'ดำเนินการเสร็จสิ้นค่ะ'}` };
             } catch (err) {
                 return { type: 'text', text: `❌ Canva Error: ${err.message}` };
+            }
+        }
+
+        case 'RECOVER_WIFI': {
+            const { execSync } = require('child_process');
+            try {
+                // 1. Get List of Profiles
+                const profilesOutput = execSync('netsh wlan show profiles').toString();
+                const profileNames = profilesOutput
+                    .split('\n')
+                    .filter(line => line.includes(':'))
+                    .map(line => line.split(':')[1].trim())
+                    .filter(name => name !== '');
+
+                if (profileNames.length === 0) {
+                    return { type: 'text', text: '❌ ไม่พบโปรไฟล์ Wi-Fi ที่บันทึกไว้ในเครื่องนี้ค่ะ' };
+                }
+
+                let report = `📶 **Wi-Fi Password Recovery Report** 📑\n\n`;
+                
+                // If user asked for specific SSID
+                const targetSSID = data.ssid || data.name;
+                const profilesToScan = targetSSID ? profileNames.filter(n => n.toLowerCase().includes(targetSSID.toLowerCase())) : profileNames.slice(0, 15); // Limit to top 15 for safety
+
+                for (const ssid of profilesToScan) {
+                    try {
+                        const detailOutput = execSync(`netsh wlan show profile name="${ssid}" key=clear`).toString();
+                        const keyMatch = detailOutput.match(/Key Content\s*:\s*(.*)/i) || detailOutput.match(/เนื้อหาคีย์\s*:\s*(.*)/i);
+                        const password = keyMatch ? keyMatch[1].trim() : "(No Password / Open)";
+                        report += `🔹 **SSID:** \`${ssid}\`\n   🔑 **Password:** \`${password}\`\n\n`;
+                    } catch (e) {
+                        report += `🔸 **SSID:** \`${ssid}\` (Error retrieving password)\n\n`;
+                    }
+                }
+
+                if (profileNames.length > profilesToScan.length) {
+                    report += `\n💡 *แสดงรายการล่าสุด ${profilesToScan.length} จากทั้งหมด ${profileNames.length} รายการค่ะ*`;
+                }
+
+                return { type: 'text', text: report };
+            } catch (err) {
+                return { type: 'text', text: `❌ Wi-Fi Recovery Error: ${err.message}` };
             }
         }
 
