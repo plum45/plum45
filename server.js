@@ -179,6 +179,7 @@ async function processStacyAI(ctx, userMsg, fileContent = "") {
         tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
     }
     const userStore = tgContexts.get(userId);
+    if (!userStore) return; // Final safety
 
     try {
         // 🚀 PARALLEL DATA FETCHING (Speed Boost)
@@ -466,8 +467,11 @@ if (bot && !IS_RELAY) {
         }
 
         if (msg.startsWith('/think')) {
-            if (!tgContexts.has(userId)) tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0 });
+            if (!tgContexts.has(userId)) {
+                tgContexts.set(userId, { history: [], skills: null, lastSkillFetch: 0, thinkingMode: true });
+            }
             const userStore = tgContexts.get(userId);
+            if (!userStore) return;
             
             if (msg === '/think off' || msg === '/think 0' || msg === '/think false') {
                 userStore.thinkingMode = false;
@@ -505,6 +509,7 @@ if (bot && !IS_RELAY) {
         .catch(err => console.error('❌ Bot Launch Error:', err.message));
 }
 
+// ========== RELAY MODE: Local PC Listener ==========
 if (IS_RELAY && db) {
     console.log('🖐️ Starting Local Relay Listener...');
     // In relay mode, we also initialize bot for sending results back to Telegram
