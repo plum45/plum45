@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
+const express = require('express');
 
 // Check if running as relay (Local PC)
 const IS_RELAY = process.env.IS_RELAY === 'true';
@@ -380,6 +381,14 @@ if (IS_RELAY && db) {
     const { setupRelayListener } = require('./system/bridge');
     setupRelayListener(db, SNOW_ID, { bot, client });
 }
+
+// ========== Express Server for Dashboard ==========
+const app = express();
+app.use(express.static(path.join(__dirname, 'public')));
+
+app.listen(CONFIG.PORT, () => {
+    console.log(`🌐 Dashboard Server is running on port ${CONFIG.PORT}`);
+});
 
 // ========== Clean Up on Exit ==========
 process.once('SIGINT', () => { if (bot) bot.stop('SIGINT'); process.exit(0); });
