@@ -1,24 +1,498 @@
 <!DOCTYPE html>
-<html lang="en">
-
+<html lang="th">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Stacy AI Agent</title>
+    <title>Stacy ✨ AI Secretary | Dashboard</title>
+    <meta name="description" content="Stacy AI — เลขาอัจฉริยะสุดน่ารักของพี่ Snow จัดตาราง ค้นหาข้อมูล อำนวยความสะดวกทุกเรื่อง">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Kanit:wght@300;400;500;600&display=swap"
-        rel="stylesheet">
-    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Kanit:wght@300;400;500;600;700&family=Outfit:wght@300;500;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="stacy-dashboard.css">
 </head>
-
 <body>
-    <div id="app"></div>
-    <!-- Firebase SDKs -->
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-firestore.js"></script>
-    <script src="app.js"></script>
-</body>
+    <!-- Animated Background -->
+    <div class="bg-mesh"></div>
+    <div class="particles">
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+        <div class="particle"></div>
+    </div>
 
+    <div class="app" id="app">
+        <!-- ==================== SIDEBAR (Desktop) ==================== -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-logo" title="Stacy AI">✨</div>
+            <nav class="sidebar-nav" id="sidebarNav">
+                <button class="sidebar-btn active" data-tab="dashboard" data-tooltip="Dashboard">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+                </button>
+                <button class="sidebar-btn" data-tab="calendar" data-tooltip="ปฏิทิน">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                </button>
+                <button class="sidebar-btn" data-tab="search" data-tooltip="ค้นหา">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                </button>
+                <button class="sidebar-btn" data-tab="stocks" data-tooltip="หุ้น & การเงิน">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                </button>
+                <button class="sidebar-btn" data-tab="schedule" data-tooltip="ตารางสอน">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="3" y1="10" x2="21" y2="10"/><line x1="9" y1="4" x2="9" y2="22"/></svg>
+                </button>
+                <button class="sidebar-btn" data-tab="chat" data-tooltip="คุยกับ Stacy">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                </button>
+            </nav>
+            <div class="sidebar-bottom">
+                <div class="sidebar-status" id="sidebarStatus" title="Online"></div>
+                <div class="sidebar-clock" id="sidebarClock"></div>
+            </div>
+        </aside>
+
+        <!-- ==================== MAIN AREA ==================== -->
+        <div class="main-area">
+            <!-- ===== TOP BAR ===== -->
+            <header class="topbar">
+                <div class="topbar-left">
+                    <h1 class="topbar-title">Stacy AI</h1>
+                    <span class="topbar-breadcrumb" id="pageBreadcrumb">/ Dashboard</span>
+                </div>
+                <div class="topbar-right">
+                    <div class="topbar-badge" id="statusPill">
+                        <div class="dot"></div>
+                        <span>Online</span>
+                    </div>
+                    <div class="topbar-clock" id="liveClock">--:--:--</div>
+                    <div class="topbar-avatar" id="topAvatar">🌸</div>
+                </div>
+            </header>
+
+            <!-- ===== PAGE CONTENT ===== -->
+            <main class="page-content">
+                <!-- ==================== DASHBOARD ==================== -->
+                <section class="tab-panel active" id="tab-dashboard">
+                    <!-- Hero Greeting -->
+                    <div class="hero-card" id="greetingCard">
+                        <div class="hero-inner">
+                            <div class="hero-text">
+                                <div class="hero-mascot">🌸</div>
+                                <div class="hero-info">
+                                    <h2 id="greetingMsg">สวัสดีค่ะ พี่ Snow ✨</h2>
+                                    <p class="hero-date" id="greetingDate">กำลังโหลดข้อมูล...</p>
+                                </div>
+                            </div>
+                            <div class="hero-actions">
+                                <button class="btn btn-primary" onclick="switchTab('calendar')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                                    ดูปฏิทิน
+                                </button>
+                                <button class="btn btn-ghost" onclick="switchTab('search')">
+                                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                    ค้นหา
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Stats Row -->
+                    <div class="stats-row">
+                        <div class="stat-card" data-accent="purple">
+                            <div class="stat-icon purple">📅</div>
+                            <div class="stat-info">
+                                <span class="stat-number" id="eventCount">-</span>
+                                <span class="stat-label">นัดหมายวันนี้</span>
+                            </div>
+                        </div>
+                        <div class="stat-card" data-accent="blue">
+                            <div class="stat-icon blue">✅</div>
+                            <div class="stat-info">
+                                <span class="stat-number" id="taskCount">-</span>
+                                <span class="stat-label">งานที่รอดำเนินการ</span>
+                            </div>
+                        </div>
+                        <div class="stat-card" data-accent="green">
+                            <div class="stat-icon green">🤖</div>
+                            <div class="stat-info">
+                                <span class="stat-number" id="systemStatus">Active</span>
+                                <span class="stat-label">สถานะระบบ</span>
+                            </div>
+                        </div>
+                        <div class="stat-card" data-accent="amber">
+                            <div class="stat-icon amber">🔥</div>
+                            <div class="stat-info">
+                                <span class="stat-number" id="fbStatus">-</span>
+                                <span class="stat-label">Firebase</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Dashboard Grid -->
+                    <div class="grid-2">
+                        <!-- Upcoming Events -->
+                        <div class="card" id="upcomingCard">
+                            <div class="card-header">
+                                <h3>📅 นัดหมายที่ใกล้จะถึง</h3>
+                                <button class="card-action" onclick="switchTab('calendar')">ดูทั้งหมด →</button>
+                            </div>
+                            <div class="card-body" id="upcomingEvents">
+                                <div class="loading-shimmer"><div></div><div></div><div></div></div>
+                            </div>
+                        </div>
+
+                        <!-- Quick Actions -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>⚡ Quick Actions</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="quick-actions">
+                                    <button class="qa-btn" onclick="openAddEventModal()">
+                                        <span class="qa-icon">📅</span>
+                                        <span>เพิ่มนัดหมาย</span>
+                                    </button>
+                                    <button class="qa-btn" onclick="quickSearch('ราคาทองวันนี้')">
+                                        <span class="qa-icon">💰</span>
+                                        <span>ราคาทอง</span>
+                                    </button>
+                                    <button class="qa-btn" onclick="quickSearch('ข่าวสำคัญวันนี้')">
+                                        <span class="qa-icon">📰</span>
+                                        <span>ข่าววันนี้</span>
+                                    </button>
+                                    <button class="qa-btn" onclick="quickSearch('อัตราแลกเปลี่ยนวันนี้')">
+                                        <span class="qa-icon">💱</span>
+                                        <span>อัตราแลกเปลี่ยน</span>
+                                    </button>
+                                    <button class="qa-btn" onclick="quickSearch('สภาพอากาศ กรุงเทพ')">
+                                        <span class="qa-icon">🌤️</span>
+                                        <span>สภาพอากาศ</span>
+                                    </button>
+                                    <button class="qa-btn" onclick="switchTab('chat')">
+                                        <span class="qa-icon">💬</span>
+                                        <span>คุยกับ Stacy</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Latest News -->
+                        <div class="card grid-full">
+                            <div class="card-header">
+                                <h3>📰 ข่าวล่าสุดวันนี้</h3>
+                                <button class="card-action" onclick="refreshNews()">รีเฟรช ↻</button>
+                            </div>
+                            <div class="card-body" id="newsContainer">
+                                <div class="loading-shimmer"><div></div><div></div><div></div></div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================== CALENDAR ==================== -->
+                <section class="tab-panel" id="tab-calendar">
+                    <div class="calendar-layout">
+                        <div class="calendar-main">
+                            <div class="calendar-header">
+                                <button class="cal-nav-btn" id="calPrev">‹</button>
+                                <h2 class="cal-month-title" id="calMonthTitle">เมษายน 2569</h2>
+                                <button class="cal-nav-btn" id="calNext">›</button>
+                                <button class="btn-add-event" onclick="openAddEventModal()">+ เพิ่มนัดหมาย</button>
+                            </div>
+                            <div class="calendar-grid" id="calendarGrid"></div>
+                        </div>
+                        <div class="calendar-sidebar">
+                            <div class="card">
+                                <div class="card-header"><h3 id="selectedDateTitle">📋 กิจกรรมวันนี้</h3></div>
+                                <div class="card-body" id="dayEventsList">
+                                    <p class="empty-state">เลือกวันจากปฏิทินเพื่อดูกิจกรรม</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================== SEARCH ==================== -->
+                <section class="tab-panel" id="tab-search">
+                    <div class="search-layout">
+                        <div class="search-hero">
+                            <h2 class="search-title">🔍 ค้นหาข้อมูลเรียลไทม์</h2>
+                            <p class="search-sub">ข้อมูลจาก Google ล่าสุด ไม่มีข้อมูลเก่า ✨</p>
+                            <div class="search-bar">
+                                <input type="text" id="searchInput" placeholder="พิมพ์คำค้นหา... เช่น ราคาทองวันนี้, ข่าวล่าสุด" autocomplete="off">
+                                <button class="search-btn" id="searchBtn" onclick="performSearch()">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                                </button>
+                            </div>
+                            <div class="search-suggestions">
+                                <button class="search-tag" onclick="quickSearch('ราคาทองคำวันนี้ 2026')">💰 ราคาทอง</button>
+                                <button class="search-tag" onclick="quickSearch('ข่าวเศรษฐกิจไทย 2026')">📊 เศรษฐกิจไทย</button>
+                                <button class="search-tag" onclick="quickSearch('หุ้นไทยวันนี้ set')">📈 หุ้นไทย</button>
+                                <button class="search-tag" onclick="quickSearch('สภาพอากาศ กรุงเทพ วันนี้')">🌤️ อากาศ</button>
+                                <button class="search-tag" onclick="quickSearch('อัตราแลกเปลี่ยน บาท ดอลลาร์')">💱 แลกเปลี่ยน</button>
+                                <button class="search-tag" onclick="quickSearch('AI technology news 2026')">🤖 AI News</button>
+                            </div>
+                        </div>
+                        <div class="search-results" id="searchResults"></div>
+                    </div>
+                </section>
+
+                <!-- ==================== STOCKS ==================== -->
+                <section class="tab-panel" id="tab-stocks">
+                    <div class="stocks-layout">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>📊 พอร์ตหุ้นของพี่ Snow</h3>
+                                <button class="card-action" onclick="openPortfolioModal()">+ จัดการพอร์ต</button>
+                            </div>
+                            <div class="card-body">
+                                <div class="portfolio-tags" id="portfolioTags">
+                                    <span class="portfolio-empty">⏳ กำลังโหลดพอร์ตหุ้น...</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="card card-wide">
+                            <div class="card-header">
+                                <h3>💹 ราคาเรียลไทม์ (Yahoo Finance)</h3>
+                                <button class="card-action" onclick="loadStockPrices()">รีเฟรช ↻</button>
+                            </div>
+                            <div class="card-body" id="stockPricesContainer">
+                                <p class="empty-state">กำลังโหลดราคาเรียลไทม์... ⏳</p>
+                            </div>
+                        </div>
+
+                        <div class="card card-wide">
+                            <div class="card-header">
+                                <h3>📈 สรุปข่าวหุ้นวันนี้</h3>
+                                <button class="card-action" id="refreshStockBtn" onclick="loadStockBriefing()">รีเฟรช ↻</button>
+                            </div>
+                            <div class="card-body" id="stockBriefingContainer">
+                                <p class="empty-state">กด "รีเฟรช" หรือเพิ่มหุ้นในพอร์ตเพื่อดูข่าว 📰✨</p>
+                            </div>
+                        </div>
+
+                        <div class="card card-wide">
+                            <div class="card-header">
+                                <h3>🏦 ปฏิทินเศรษฐกิจ (Forex Factory)</h3>
+                                <button class="card-action" id="refreshForexBtn" onclick="loadForexCalendar()">รีเฟรช ↻</button>
+                            </div>
+                            <div class="card-body" id="forexCalendarContainer">
+                                <p class="empty-state">กำลังโหลดข่าวเศรษฐกิจ... ⏳</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================== SCHEDULE ==================== -->
+                <section class="tab-panel" id="tab-schedule">
+                    <div class="stocks-layout">
+                        <div class="card">
+                            <div class="card-header">
+                                <h3>📋 ตารางสอนของพี่ Snow</h3>
+                                <button class="card-action" onclick="openScheduleModal()">+ เพิ่มวิชา</button>
+                            </div>
+                            <div class="card-body">
+                                <div id="scheduleContainer">
+                                    <p class="empty-state">ยังไม่มีตารางสอน — กด "+ เพิ่มวิชา" เพื่อเริ่มต้น 📚</p>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="card card-wide">
+                            <div class="card-header">
+                                <h3>🔔 การแจ้งเตือนก่อนสอน</h3>
+                            </div>
+                            <div class="card-body">
+                                <p style="color: var(--text-2); font-size: 0.85rem;">📌 ระบบจะแจ้งเตือนผ่าน Telegram <strong>1 วัน</strong> ก่อนมีคาบสอน และ <strong>1 ชั่วโมง</strong> ก่อนเริ่มสอน</p>
+                                <p style="color: var(--text-3); font-size: 0.78rem; margin-top: 8px;">💡 Tip: เพิ่มตารางสอนด้านบน แล้ว Stacy จะจัดการเตือนให้อัตโนมัติค่ะ ✨</p>
+                            </div>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- ==================== CHAT ==================== -->
+                <section class="tab-panel" id="tab-chat">
+                    <div class="chat-layout">
+                        <div class="chat-messages" id="chatMessages">
+                            <div class="chat-welcome">
+                                <div class="chat-avatar-large">🌸</div>
+                                <h2>สวัสดีค่ะ พี่ Snow! ✨💖</h2>
+                                <p>หนูคือน้อง Stacy เลขาสุดน่ารักของพี่ค่ะ<br>สั่งอะไรมาได้เลยนะคะ หนูพร้อมช่วยทุกเรื่อง! 🎀🍭</p>
+                                <div class="chat-suggest-grid">
+                                    <button class="chat-suggest" onclick="sendChatMessage('วันนี้มีนัดหมายอะไรบ้าง')">📅 นัดหมายวันนี้</button>
+                                    <button class="chat-suggest" onclick="sendChatMessage('สรุปข่าวสำคัญวันนี้ให้หน่อย')">📰 สรุปข่าว</button>
+                                    <button class="chat-suggest" onclick="sendChatMessage('ช่วยลงตารางประชุมพรุ่งนี้ 10 โมง')">📝 ลงตาราง</button>
+                                    <button class="chat-suggest" onclick="sendChatMessage('ราคาทองวันนี้เท่าไหร่')">💰 ราคาทอง</button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="chat-input-area">
+                            <div class="chat-input-box">
+                                <textarea id="chatInput" placeholder="พิมพ์ข้อความถึง Stacy... ✨" rows="1"></textarea>
+                                <button class="chat-send-btn" id="chatSendBtn" onclick="sendChatFromInput()">
+                                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"><path d="M22 2L11 13" stroke="white" stroke-width="2" stroke-linecap="round"/><path d="M22 2L15 22L11 13L2 9L22 2Z" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+                                </button>
+                            </div>
+                            <p class="chat-disclaimer">Stacy ใช้ AI ประมวลผล ข้อมูลอาจคลาดเคลื่อน กรุณาตรวจสอบซ้ำค่ะ 💖</p>
+                        </div>
+                    </div>
+                </section>
+            </main>
+        </div>
+
+        <!-- ==================== MOBILE BOTTOM NAV ==================== -->
+        <nav class="mobile-nav" id="mobileNav">
+            <button class="mobile-nav-btn active" data-tab="dashboard" onclick="switchTab('dashboard')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/></svg>
+                <span>Home</span>
+            </button>
+            <button class="mobile-nav-btn" data-tab="calendar" onclick="switchTab('calendar')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                <span>ปฏิทิน</span>
+            </button>
+            <button class="mobile-nav-btn" data-tab="search" onclick="switchTab('search')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <span>ค้นหา</span>
+            </button>
+            <button class="mobile-nav-btn" data-tab="stocks" onclick="switchTab('stocks')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>
+                <span>หุ้น</span>
+            </button>
+            <button class="mobile-nav-btn" data-tab="chat" onclick="switchTab('chat')">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+                <span>แชท</span>
+            </button>
+        </nav>
+    </div>
+
+    <!-- ==================== MODALS ==================== -->
+    <!-- Add Event Modal -->
+    <div class="modal-overlay" id="addEventModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>📅 เพิ่มนัดหมายใหม่</h3>
+                <button class="modal-close" onclick="closeAddEventModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ชื่อกิจกรรม</label>
+                    <input type="text" id="eventTitle" placeholder="เช่น ประชุมทีม, นัดพบหมอ">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>วันที่เริ่ม</label>
+                        <input type="date" id="eventDate">
+                    </div>
+                    <div class="form-group">
+                        <label>เวลาเริ่ม</label>
+                        <input type="time" id="eventTime" value="09:00">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>วันที่สิ้นสุด</label>
+                        <input type="date" id="eventEndDate">
+                    </div>
+                    <div class="form-group">
+                        <label>เวลาสิ้นสุด</label>
+                        <input type="time" id="eventEndTime" value="10:00">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>รายละเอียด (ไม่บังคับ)</label>
+                    <textarea id="eventDesc" placeholder="รายละเอียดเพิ่มเติม..." rows="2"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>สถานที่ (ไม่บังคับ)</label>
+                    <input type="text" id="eventLocation" placeholder="เช่น ห้องประชุม A">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeAddEventModal()">ยกเลิก</button>
+                <button class="btn-submit" onclick="submitNewEvent()">
+                    <span id="submitEventText">📅 บันทึกนัดหมาย</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Portfolio Modal -->
+    <div class="modal-overlay" id="portfolioModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>📊 จัดการพอร์ตหุ้น</h3>
+                <button class="modal-close" onclick="closePortfolioModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>รายชื่อหุ้นที่ถืออยู่ (คั่นด้วยเครื่องหมาย ,)</label>
+                    <input type="text" id="portfolioInput" placeholder="เช่น AOT, CPALL, PTT, DELTA">
+                </div>
+                <p style="color:var(--text-muted);font-size:0.85rem;">💡 พิมพ์สัญลักษณ์หุ้นคั่นด้วยคอมม่า น้อง Stacy จะสแกนข่าวให้ทุกตัวค่ะ</p>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closePortfolioModal()">ยกเลิก</button>
+                <button class="btn-submit" onclick="savePortfolio()">💾 บันทึกพอร์ต</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schedule Modal -->
+    <div class="modal-overlay" id="scheduleModal">
+        <div class="modal-card">
+            <div class="modal-header">
+                <h3>📋 เพิ่มวิชาสอน</h3>
+                <button class="modal-close" onclick="closeScheduleModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>ชื่อวิชา</label>
+                    <input type="text" id="schedSubject" placeholder="เช่น ชีววิทยา ม.4">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>วันเรียน</label>
+                        <select id="schedDay">
+                            <option value="จันทร์">จันทร์</option>
+                            <option value="อังคาร">อังคาร</option>
+                            <option value="พุธ">พุธ</option>
+                            <option value="พฤหัสบดี">พฤหัสบดี</option>
+                            <option value="ศุกร์">ศุกร์</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>ห้องเรียน</label>
+                        <input type="text" id="schedRoom" placeholder="เช่น ห้อง 301">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>เวลาเริ่ม</label>
+                        <input type="time" id="schedStart" value="08:30">
+                    </div>
+                    <div class="form-group">
+                        <label>เวลาจบ</label>
+                        <input type="time" id="schedEnd" value="10:20">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>หมายเหตุ (ไม่บังคับ)</label>
+                    <input type="text" id="schedNote" placeholder="เช่น เตรียมอุปกรณ์แลป">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeScheduleModal()">ยกเลิก</button>
+                <button class="btn-submit" onclick="saveScheduleItem()">📋 บันทึกวิชา</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+
+    <script src="stacy-dashboard.js"></script>
+</body>
 </html>

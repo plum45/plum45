@@ -739,6 +739,28 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
             break;
         }
 
+        case 'OPEN_DASHBOARD': {
+            console.log("Stacy: Opening Dashboard...", data);
+            
+            // ใช้ ngrok url หรือ cloud/render url ถ้ารันบนเซิฟเวอร์ 
+            // กรณีเป็น localhost ปกติ: 
+            const dashboardUrl = process.env.RENDER_EXTERNAL_URL 
+                ? process.env.RENDER_EXTERNAL_URL 
+                : 'http://localhost:10000';
+
+            const inlineKeyboard = {
+                reply_markup: {
+                    inline_keyboard: [[
+                        { text: '🖥️ เปิดหน้า Dashboard', url: dashboardUrl }
+                    ]]
+                }
+            };
+            
+            // ส่งปุ่มให้ผู้ใช้กดเข้าไป
+            ctx.reply(`พร้อมแล้วค่ะ! กดปุ่มด้านล่างเพื่อเปิดหน้า Dashboard ได้เลยนะคะ ✨`, inlineKeyboard);
+            break;
+        }
+
         default:
             if (modularSkills.handlers[type]) {
                 try {

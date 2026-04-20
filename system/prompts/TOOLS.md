@@ -6,7 +6,8 @@
 - `NEWS_SEARCH`: ค้นหาข่าวสดจาก Google News พร้อมแหล่งที่มาและเวลา
 - `IMAGE_SEARCH`: ค้นหาภาพจริงจาก Google Images
 
-## 📄 เครื่องมือสร้างไฟล์
+## 📄 เครื่องมือสร้างไฟล์และแดชบอร์ด
+- `OPEN_DASHBOARD`: เรียกเปิดหน้าเว็บไซต์ Dashboard ของระบบ ส่งลิงก์พร้อมปุ่มเปิดทันที
 - `CREATE_EXCEL`: สร้างไฟล์ Excel (.xlsx) พร้อมข้อมูลจริง — **ต้องมี headers และ rows**
 - `CREATE_WORD`: สร้างไฟล์ Word (.docx) พร้อมเนื้อหา — **ต้องมี sections**
 - `CREATE_SLIDE`: สร้างไฟล์ PowerPoint (.pptx) — **ต้องมี slides**

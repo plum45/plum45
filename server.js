@@ -346,6 +346,13 @@ if (bot && !IS_RELAY) {
             return;
         }
 
+        // Fast-path: เปิดแดชบอร์ด
+        if (/^(เปิดหน้าแดชบอร์ด|แดชบอร์ด|dashboard|เปิดระบบ|เปิดเว็บ)/i.test(msg)) {
+            const { handleAgentActions } = require('./system/actions');
+            await handleAgentActions('OPEN_DASHBOARD', {}, ctx, userId, { client: db });
+            return;
+        }
+
         if (msg === '/debug') {
             const userStore = tgContexts.get(userId);
             ctx.reply(`⚙️ **Debug Info:**\n- Mode: ${IS_RENDER ? 'Render' : 'Local'}\n- Model: ${CONFIG.MODEL}\n- History: ${userStore?.history.length || 0} msgs\n- Thinking: ${userStore?.thinkingMode}\n- Version: ${CONFIG.VERSION}`);
