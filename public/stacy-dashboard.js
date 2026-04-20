@@ -6,6 +6,10 @@
 
 // ========== STATE ==========
 const AppState = {
+    // เลือก Backend URL ตามโดเมนที่รันอยู่
+    API_BASE: window.location.hostname.includes('vercel.app') 
+              ? 'https://plum45.onrender.com' 
+              : '',
     calendarEvents: [],
     currentMonth: new Date(),
     selectedDate: null,
@@ -100,7 +104,7 @@ function switchTab(tabName) {
 async function loadDashboard() {
     try {
         // Load quick info
-        const infoRes = await fetch('/api/quick-info');
+        const infoRes = await fetch(`${AppState.API_BASE}/api/quick-info`);
         const info = await infoRes.json();
 
         document.getElementById('greetingMsg').textContent = info.greeting + ' พี่ Snow ✨';
@@ -137,7 +141,7 @@ async function loadDashboard() {
 // ========== CALENDAR EVENTS ==========
 async function loadCalendarEvents() {
     try {
-        const res = await fetch('/api/calendar');
+        const res = await fetch(`${AppState.API_BASE}/api/calendar`);
         AppState.calendarEvents = await res.json();
         console.log(`✅ Loaded ${AppState.calendarEvents.length} events`);
     } catch (e) {
@@ -313,7 +317,7 @@ async function performSearch() {
     container.innerHTML = '<div class="spinner"></div>';
 
     try {
-        const res = await fetch(`/api/search?q=${encodeURIComponent(query)}`);
+        const res = await fetch(`${AppState.API_BASE}/api/search?q=${encodeURIComponent(query)}`);
         const data = await res.json();
 
         if (data.error) {
@@ -383,7 +387,7 @@ async function refreshNews() {
 
     try {
         // อัปเดตคำค้นหาเน้น หุ้น เศรษฐกิจ เทคโนโลยี และการศึกษา
-        const res = await fetch('/api/news?q=ข่าวเศรษฐกิจ หุ้น เทคโนโลยี การศึกษา');
+        const res = await fetch(`${AppState.API_BASE}/api/news?q=ข่าวเศรษฐกิจ หุ้น เทคโนโลยี การศึกษา`);
         const data = await res.json();
 
         if (!data.news || data.news.length === 0) {
@@ -477,7 +481,7 @@ async function sendChatMessage(message) {
     AppState.chatHistory.push({ role: 'user', content: message });
 
     try {
-        const response = await fetch('/api/chat', {
+        const response = await fetch(`${AppState.API_BASE}/api/chat`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -679,7 +683,7 @@ let portfolioStocks = [];
 
 async function loadPortfolio() {
     try {
-        const res = await fetch('/api/portfolio');
+        const res = await fetch(`${AppState.API_BASE}/api/portfolio`);
         const data = await res.json();
         portfolioStocks = data.stocks || [];
         renderPortfolioTags();
@@ -729,7 +733,7 @@ async function savePortfolio() {
     const stocks = raw.split(',').map(s => s.trim().toUpperCase()).filter(s => s);
 
     try {
-        const res = await fetch('/api/portfolio', {
+        const res = await fetch(`${AppState.API_BASE}/api/portfolio`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ stocks })
@@ -757,7 +761,7 @@ async function loadStockBriefing() {
     container.innerHTML = '<div class="spinner"></div><p style="text-align:center;color:var(--text-muted);margin-top:8px;">🔍 น้อง Stacy กำลังสแกนข่าวหุ้นให้พี่ Snow...</p>';
 
     try {
-        const res = await fetch(`/api/stock-briefing?symbols=${encodeURIComponent(symbols)}`);
+        const res = await fetch(`${AppState.API_BASE}/api/stock-briefing?symbols=${encodeURIComponent(symbols)}`);
         const data = await res.json();
 
         if (data.error) {
@@ -806,7 +810,7 @@ async function loadStockPrices() {
     // Get portfolio stocks + add some default tracking symbols
     let symbols = [];
     try {
-        const res = await fetch('/api/portfolio');
+        const res = await fetch(`${AppState.API_BASE}/api/portfolio`);
         const data = await res.json();
         symbols = data.stocks || [];
     } catch (e) { /* ignore */ }
@@ -821,7 +825,7 @@ async function loadStockPrices() {
     }
 
     try {
-        const res = await fetch(`/api/stock-prices?symbols=${allSymbols.join(',')}`);
+        const res = await fetch(`${AppState.API_BASE}/api/stock-prices?symbols=${allSymbols.join(',')}`);
         const data = await res.json();
 
         if (!data.prices || Object.keys(data.prices).length === 0) {
