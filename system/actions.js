@@ -742,11 +742,10 @@ async function handleAgentActions(ctx, type, data, userId, options = {}) {
         case 'OPEN_DASHBOARD': {
             console.log("Stacy: Opening Dashboard...", data);
             
-            // ใช้ ngrok url หรือ cloud/render url ถ้ารันบนเซิฟเวอร์ 
-            // กรณีเป็น localhost ปกติ: 
-            const dashboardUrl = process.env.RENDER_EXTERNAL_URL 
-                ? process.env.RENDER_EXTERNAL_URL 
-                : 'http://localhost:10000';
+            // ใช้ DASHBOARD_URL (Vercel) หรือ RENDER_EXTERNAL_URL หรือ localhost 
+            const dashboardUrl = process.env.DASHBOARD_URL
+                ? process.env.DASHBOARD_URL
+                : (process.env.RENDER_EXTERNAL_URL ? process.env.RENDER_EXTERNAL_URL : 'http://localhost:10000');
 
             const inlineKeyboard = {
                 reply_markup: {
